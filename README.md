@@ -22,12 +22,12 @@ Tải các file mới lên đè vào kho GitHub (Add file → Upload files). **�
 ## Đồng bộ Google Calendar (tùy chọn)
 
 Một lần trên Google Cloud (dự án `Tai Chinh`):
-1. Ô tìm kiếm → **Google Calendar API** → **Enable**.
+1. Ô tìm kiếm → **Google Calendar API** → **Enable**. Làm tương tự với **Google Tasks API** (để lấy Việc cần làm).
 2. Google Auth Platform → **Data Access** → **Add or remove scopes** → tick `.../auth/calendar.app.created` → **Update** → **Save**.
 
 Trong app: **Đăng xuất Google**, đăng nhập lại, tick **cả hai ô** về Lịch (tạo lịch và xem lịch). Sau đó vào Cài đặt → Google Calendar:
 
-- **Bật lấy lịch về**: sự kiện bạn thêm trên Google Calendar (điện thoại hay máy tính) tự hiện trong app thành *show nháp, chưa có giá*. Mặc định lấy từ lịch chính, có thể chọn lịch khác và lọc theo chữ trong tiêu đề. Bỏ qua sinh nhật và việc lặp lại hằng tuần. Đổi giờ hay xóa sự kiện trên Google thì app tự cập nhật. App chỉ đọc, không sửa lịch cá nhân. App lấy lịch khi mở, khi quay lại app và mỗi 5 phút.
+- **Bật lấy lịch về**: sự kiện và Việc cần làm (Google Tasks, loại có đặt ngày) bạn thêm trên Google Calendar (điện thoại hay máy tính) tự hiện trong app thành *show nháp, chưa có giá*. Mặc định lấy từ lịch chính, có thể chọn lịch khác và lọc theo chữ trong tiêu đề. Bỏ qua sinh nhật và việc lặp lại hằng tuần. Đổi giờ hay xóa sự kiện trên Google thì app tự cập nhật. App chỉ đọc, không sửa lịch cá nhân. App lấy lịch khi mở, khi quay lại app và mỗi 5 phút.
 - **Bật đưa lên**: show tạo trong app được đưa lên lịch riêng *Lịch làm việc freelance*, tự cập nhật khoảng 4 giây sau mỗi lần sửa. Show lấy từ Google thì không đưa lên lần nữa (tránh trùng).
 
 ## Mẹo dùng nhanh
@@ -83,3 +83,10 @@ tests/                     Kiểm thử (Node.js + trình duyệt)
 ```
 
 Chạy kiểm thử (cần Node.js 20+): `node --test tests/*.test.mjs`.
+
+
+## Đăng nhập và tự khóa
+
+- Bấm F5 hay mở lại app trong cùng tab thì vào thẳng, không phải đăng nhập lại, trong khoảng 1 giờ kể từ lần đăng nhập (giới hạn của Google). Hết giờ thì app hỏi đăng nhập lại bằng một lần bấm, dữ liệu đang xem không mất.
+- Phiên đăng nhập chỉ nằm trong tab đó (sessionStorage), tự xóa khi đóng tab/app, khi bấm Khóa hoặc khi hết hạn.
+- Tự khóa khi không dùng: chỉnh ở Cài đặt → Bảo mật (mặc định 10 phút).

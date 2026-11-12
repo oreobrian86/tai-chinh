@@ -50,10 +50,12 @@ export async function settingsView(root) {
       <section class="panel"><div class="panel-head"><h2>Google Calendar</h2>${settings.gcal_enabled || settings.gcal_import ? '<span class="chip sage">Đang đồng bộ</span>' : ''}</div>
         ${runtime.demo ? '<p class="muted small">Chế độ dùng thử không đồng bộ Google Calendar.</p>' : `
         <h3>Lấy lịch từ Google Calendar về app</h3>
-        <p class="small muted">Sự kiện bạn thêm trên Google Calendar (trên điện thoại hay máy tính) sẽ tự hiện trong app thành <b>show nháp, chưa có giá</b>. Mở show nháp để điền khách và tiền công, hoặc bấm "Không phải show" nếu đó là việc riêng. Đổi giờ hay xóa sự kiện trên Google thì app tự cập nhật theo. App chỉ đọc, không sửa lịch của bạn.</p>
+        <p class="small muted">Sự kiện và việc cần làm bạn thêm trên Google Calendar (trên điện thoại hay máy tính) sẽ tự hiện trong app thành <b>show nháp, chưa có giá</b>. Mở show nháp để điền khách và tiền công, hoặc bấm "Không phải show" nếu đó là việc riêng. Đổi giờ hay xóa sự kiện trên Google thì app tự cập nhật theo. App chỉ đọc, không sửa lịch của bạn.</p>
         ${!canRead ? `<div class="notice warn mt-xs">Lần đăng nhập này chưa có quyền xem lịch. Bấm <b>Đăng xuất Google</b> ở mục Bảo mật, đăng nhập lại và tick ô cho phép <b>xem lịch</b>.</div>` : ''}
         ${settings.gcal_import && canRead ? `
           <div class="field mt-xs"><span>Lấy từ các lịch</span><div class="stack">${calList.filter(c => c.id !== settings.gcal_calendar_id).map(c => `<label class="check"><input type="checkbox" name="gcal_cal" value="${h(c.id)}"${(settings.gcal_read_ids || []).includes(c.id) ? ' checked' : ''}> ${h(c.primary ? `${c.name} (lịch chính)` : c.name)}</label>`).join('') || '<span class="small muted">Không tải được danh sách lịch.</span>'}</div></div>
+          <label class="check mt-xs"><input type="checkbox" name="gcal_import_tasks"${settings.gcal_import_tasks ? ' checked' : ''}> Lấy cả <b>Việc cần làm</b> (Google Tasks) có đặt ngày</label>
+          ${settings.gcal_import_tasks && !google.tasksReadGranted() ? `<div class="notice warn mt-xs">Lần đăng nhập này chưa có quyền xem Việc cần làm. Đăng xuất Google, đăng nhập lại và tick ô cho phép <b>Tasks</b>.</div>` : ''}
           ${field('Chỉ lấy sự kiện có chữ (tùy chọn)', `<input class="input" name="gcal_import_keyword" maxlength="200" value="${h(settings.gcal_import_keyword || '')}" placeholder="Ví dụ: quay, chụp, show">`,
             'Để trống: lấy mọi sự kiện. Nhiều từ thì cách nhau dấu phẩy. Sinh nhật và việc lặp lại hằng tuần luôn được bỏ qua.')}
           <div class="row wrap mt-xs"><button class="btn sm sage" data-gimp="save">Lưu và lấy lịch ngay</button><button class="btn sm ghost danger" data-gimp="off">Tắt lấy lịch về</button></div>`
@@ -126,10 +128,12 @@ export async function settingsView(root) {
           body.calendar_ids = [...root.querySelectorAll('[name=gcal_cal]:checked')].map(x => x.value);
           if (!body.calendar_ids.length) return toast('Chọn ít nhất một lịch.', 'err');
           body.keyword = $('[name=gcal_import_keyword]', root).value.trim();
+          body.tasks = $('[name=gcal_import_tasks]', root).checked;
         }
         const r = await post('/api/gcal/import', body);
         const im = r.imported;
         toast(im.added || im.changed || im.removed ? `Đã lấy về: ${im.added} show nháp mới, cập nhật ${im.changed}, bỏ ${im.removed}` : 'Không có lịch mới.');
+        if (im.tasks_error) toast(`Chưa lấy được Việc cần làm: ${im.tasks_error}`, 'err');
       }
       state.settings = await get('/api/settings');
       await changed();

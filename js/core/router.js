@@ -225,7 +225,14 @@ export class Api {
         try { fetched.set(id, await this.calendar.listRange(id, from, to)); }
         catch (e) { if (e.status === 404 || e.status === 410) continue; throw e; }  // lịch đã bị xóa / bỏ chia sẻ
       }
-      return this.write((tx, db) => applyImport(tx, db, fetched, { from, to, keyword: st.gcal_import_keyword }));
+      // Việc cần làm (Google Tasks): lỗi ở đây (chưa bật API, chưa cấp quyền) không làm hỏng phần lấy lịch.
+      let tasksError = null;
+      if (st.gcal_import_tasks && (!this.calendar.canReadTasks || this.calendar.canReadTasks())) {
+        try { for (const [k, v] of await this.calendar.listTasks(from, to)) fetched.set(k, v); }
+        catch (e) { if (e.code === 'google_auth') throw e; tasksError = e.message; }
+      }
+      const stats = await this.write((tx, db) => applyImport(tx, db, fetched, { from, to, keyword: st.gcal_import_keyword }));
+      return tasksError ? { ...stats, tasks_error: tasksError } : stats;
     };
     // Đẩy lên: lịch làm việc → lịch riêng do app tạo.
     const push = async st => {
@@ -261,6 +268,7 @@ export class Api {
       const patch = { gcal_import: true };
       if (Array.isArray(b.calendar_ids)) patch.gcal_read_ids = b.calendar_ids.filter(x => typeof x === 'string' && x.length < 300).slice(0, 20);
       if (typeof b.keyword === 'string') patch.gcal_import_keyword = b.keyword.slice(0, 200);
+      if (typeof b.tasks === 'boolean') patch.gcal_import_tasks = b.tasks;
       const st0 = sv.getSettings(await this.read());
       if (!(patch.gcal_read_ids || st0.gcal_read_ids)?.length) patch.gcal_read_ids = [await primaryId()];
       await this.write((tx, db) => sv.updateSettings(tx, db, patch));

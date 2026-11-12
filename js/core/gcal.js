@@ -9,6 +9,8 @@ import { AppError } from './store.js';
 const API = 'https://www.googleapis.com/calendar/v3';
 export const CAL_SCOPE = 'https://www.googleapis.com/auth/calendar.app.created';
 export const CAL_READ_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
+export const TASKS_READ_SCOPE = 'https://www.googleapis.com/auth/tasks.readonly';
+const TASKS_API = 'https://tasks.googleapis.com/tasks/v1';
 export const CAL_NAME = 'Lịch làm việc freelance';
 const TZ = 'Asia/Ho_Chi_Minh';
 const KIND = { shoot: ['🎥', 'Quay', '2'], photo: ['📷', 'Chụp', '7'], edit: ['✂️', 'Dựng', '3'], deadline: ['⚑', 'Hạn bàn giao', '11'], other: ['•', 'Việc', '8'] };
@@ -66,25 +68,27 @@ export function desiredEvents(db, { includeFee = false, appUrl = '' } = {}) {
 
 export class CalendarSync {
   /** canRead(): người dùng đã cho phép đọc lịch chưa (mặc định coi như có, để kiểm thử). */
-  constructor(getToken, fetchImpl = (...a) => fetch(...a), { canRead = () => true } = {}) {
+  constructor(getToken, fetchImpl = (...a) => fetch(...a), { canRead = () => true, canReadTasks = () => true } = {}) {
     this.getToken = getToken;
     this.fetch = fetchImpl;
     this.canRead = canRead;
+    this.canReadTasks = canReadTasks;
   }
 
   async req(path, { method = 'GET', body } = {}) {
     const token = await this.getToken();
     let res;
     try {
-      res = await this.fetch(API + path, { method, headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      res = await this.fetch(path.startsWith('https://') ? path : API + path, { method, headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
         body: body ? JSON.stringify(body) : undefined });
     } catch (_) { throw new AppError(0, 'offline', 'Không kết nối được Google Calendar.'); }
     if (res.status === 401) throw new AppError(401, 'google_auth', 'Phiên đăng nhập Google đã hết hạn.');
     if (res.status === 403) {
       let m = '';
       try { m = (await res.json()).error?.message || ''; } catch (_) { }
-      if (/insufficient|scope/i.test(m)) throw new AppError(403, 'gcal_scope', 'Chưa cấp quyền Google Calendar. Hãy đăng xuất, đăng nhập lại và tick ô cho phép Lịch.');
-      if (/not been used|disabled/i.test(m)) throw new AppError(403, 'gcal_api', 'Google Calendar API chưa được bật trong dự án Google Cloud.');
+      const tasks = path.startsWith(TASKS_API);
+      if (/insufficient|scope/i.test(m)) throw new AppError(403, 'gcal_scope', tasks ? 'Chưa cấp quyền xem Việc cần làm. Hãy đăng xuất, đăng nhập lại và tick ô cho phép Tasks.' : 'Chưa cấp quyền Google Calendar. Hãy đăng xuất, đăng nhập lại và tick ô cho phép Lịch.');
+      if (/not been used|disabled/i.test(m)) throw new AppError(403, tasks ? 'tasks_api' : 'gcal_api', tasks ? 'Google Tasks API chưa được bật trong dự án Google Cloud.' : 'Google Calendar API chưa được bật trong dự án Google Cloud.');
       throw new AppError(403, 'gcal_forbidden', `Google Calendar từ chối: ${m}`);
     }
     return res;
@@ -156,6 +160,31 @@ export class CalendarSync {
       out.push(...(r.items || []));
       page = r.nextPageToken || '';
     } while (page);
+    return out;
+  }
+
+  /** Việc cần làm (Google Tasks) chưa xong, có hạn trong [from, to], đổi sang dạng sự kiện cả ngày.
+   *  Trả về Map('tasks:<mã danh sách>' → mảng sự kiện). */
+  async listTasks(from, to) {
+    const out = new Map();
+    const lists = await this.json(`${TASKS_API}/users/@me/lists?maxResults=100&fields=items(id,title)`);
+    for (const l of lists.items || []) {
+      const evs = [];
+      let page = '';
+      const q = new URLSearchParams({ showCompleted: 'false', showHidden: 'false', showDeleted: 'false', maxResults: '100',
+        dueMin: `${from}T00:00:00.000Z`, dueMax: `${fe.addDays(to, 1)}T00:00:00.000Z`, fields: 'items(id,title,notes,due,status),nextPageToken' });
+      do {
+        if (page) q.set('pageToken', page);
+        const r = await this.json(`${TASKS_API}/lists/${encodeURIComponent(l.id)}/tasks?${q}`);
+        for (const t of r.items || []) {
+          if (!t.due || t.status === 'completed') continue;
+          const date = t.due.slice(0, 10);  // Google Tasks chỉ cho biết ngày, không có giờ
+          evs.push({ id: t.id, status: 'confirmed', summary: t.title, description: t.notes, start: { date }, end: { date: fe.addDays(date, 1) } });
+        }
+        page = r.nextPageToken || '';
+      } while (page);
+      out.set(`tasks:${l.id}`, evs);
+    }
     return out;
   }
 
@@ -275,8 +304,8 @@ export function applyImport(tx, db, fetched, { from, to, keyword = '' } = {}) {
   // Sự kiện không còn trên Google (trong khoảng ngày vừa tải) → bỏ show nháp tương ứng.
   for (const [key, job] of known) {
     if (job.deleted_at || seen.has(key) || !job.draft) continue;
-    const calId = key.slice(0, key.lastIndexOf('/'));
-    if (!fetched.has(calId) || job.work_date < from || job.work_date > to) continue;
+    const calId = [...fetched.keys()].find(c => key.startsWith(c + '/'));
+    if (!calId || job.work_date < from || job.work_date > to) continue;
     if (db.live('transactions').some(t => t.job_id === job.id)) continue;
     tx.update('jobs', job.id, { gcal_src: null });  // không đánh dấu "bỏ qua": nếu sự kiện được khôi phục thì lấy lại
     tx.softDelete('jobs', job.id);

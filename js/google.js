@@ -1,5 +1,7 @@
-// Đăng nhập Google (Google Identity Services). Quyền truy cập chỉ nằm trong bộ nhớ, tự hết hạn sau khoảng 1 giờ;
-// không lưu gì lên điện thoại/máy tính.
+// Đăng nhập Google (Google Identity Services).
+// Quyền truy cập (access token) tự hết hạn sau khoảng 1 giờ. Để bấm F5 không phải đăng nhập lại, token được giữ trong
+// sessionStorage: chỉ thuộc về đúng tab này, tự xóa khi đóng tab/app, khi khóa app và khi hết hạn.
+// Không lưu dữ liệu tài chính, không lưu mật khẩu, không có refresh token (không thể tự gia hạn quá 1 giờ).
 import { CONFIG } from '../config.js';
 import { AppError } from './core/store.js';
 
@@ -9,6 +11,25 @@ let expiresAt = 0;
 let waiting = null;
 let calendarOk = false;
 let calendarReadOk = false;
+let tasksReadOk = false;
+const KEY = 'g_session';
+
+function applyScopes(scope = '') {
+  const has = s => !!s && scope.split(' ').includes(s);
+  calendarOk = has(CONFIG.CALENDAR_SCOPE);
+  calendarReadOk = has(CONFIG.CALENDAR_READ_SCOPE);
+  tasksReadOk = has(CONFIG.TASKS_READ_SCOPE);
+}
+
+/** Mở lại sau khi bấm F5: dùng lại phiên còn hạn của tab này (còn ít nhất 3 phút). */
+export function restore() {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(KEY) || 'null');
+    if (!v || !v.t || !(v.e - Date.now() > 3 * 60_000)) { sessionStorage.removeItem(KEY); return false; }
+    token = v.t; expiresAt = v.e; applyScopes(v.s);
+    return true;
+  } catch (_) { return false; }
+}
 
 export const configured = () => CONFIG.CLIENT_ID && !CONFIG.CLIENT_ID.startsWith('DAN_CLIENT_ID');
 
@@ -29,7 +50,7 @@ export async function init() {
   if (client) return;
   client = window.google.accounts.oauth2.initTokenClient({
     client_id: CONFIG.CLIENT_ID,
-    scope: [CONFIG.SCOPE, CONFIG.CALENDAR_SCOPE, CONFIG.CALENDAR_READ_SCOPE].filter(Boolean).join(' '),
+    scope: [CONFIG.SCOPE, CONFIG.CALENDAR_SCOPE, CONFIG.CALENDAR_READ_SCOPE, CONFIG.TASKS_READ_SCOPE].filter(Boolean).join(' '),
     include_granted_scopes: true,
     callback: resp => {
       const w = waiting; waiting = null;
@@ -38,10 +59,12 @@ export async function init() {
       if (!window.google.accounts.oauth2.hasGrantedAllScopes(resp, CONFIG.SCOPE)) {
         return w.reject(new AppError(401, 'google_denied', 'Cần tick ô cho phép ứng dụng truy cập Google Drive.'));
       }
-      calendarOk = !!CONFIG.CALENDAR_SCOPE && window.google.accounts.oauth2.hasGrantedAllScopes(resp, CONFIG.CALENDAR_SCOPE);
-      calendarReadOk = !!CONFIG.CALENDAR_READ_SCOPE && window.google.accounts.oauth2.hasGrantedAllScopes(resp, CONFIG.CALENDAR_READ_SCOPE);
+      const ok = s => !!s && window.google.accounts.oauth2.hasGrantedAllScopes(resp, s);
+      const scope = [CONFIG.SCOPE, CONFIG.CALENDAR_SCOPE, CONFIG.CALENDAR_READ_SCOPE, CONFIG.TASKS_READ_SCOPE].filter(ok).join(' ');
+      applyScopes(scope);
       token = resp.access_token;
       expiresAt = Date.now() + (Number(resp.expires_in) || 3600) * 1000;
+      try { sessionStorage.setItem(KEY, JSON.stringify({ t: token, e: expiresAt, s: scope })); } catch (_) { }
       w.resolve(token);
     },
     error_callback: err => {
@@ -73,11 +96,16 @@ export async function getToken() {
 export const calendarGranted = () => calendarOk;
 /** Người dùng có cho phép app đọc lịch (để lấy sự kiện về) không. */
 export const calendarReadGranted = () => calendarReadOk;
+/** Người dùng có cho phép app đọc Việc cần làm (Google Tasks) không. */
+export const tasksReadGranted = () => tasksReadOk;
 
 export const minutesLeft = () => (token ? Math.max(0, Math.floor((expiresAt - Date.now()) / 60000)) : 0);
 
 /** Khóa: bỏ quyền truy cập khỏi bộ nhớ (lần sau mở lại cần đăng nhập Google). */
-export function forget() { token = null; expiresAt = 0; }
+export function forget() {
+  token = null; expiresAt = 0;
+  try { sessionStorage.removeItem(KEY); } catch (_) { }
+}
 
 /** Đăng xuất hẳn: thu hồi quyền đã cấp cho app. */
 export function revoke() {

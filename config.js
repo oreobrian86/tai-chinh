@@ -9,4 +9,6 @@ export const CONFIG = {
   CALENDAR_SCOPE: 'https://www.googleapis.com/auth/calendar.app.created',
   // Tùy chọn: CHỈ ĐỌC lịch của bạn để lấy sự kiện mới về thành show nháp. App không sửa, không xóa lịch cá nhân.
   CALENDAR_READ_SCOPE: 'https://www.googleapis.com/auth/calendar.readonly',
+  // Tùy chọn: CHỈ ĐỌC Việc cần làm (Google Tasks) có đặt ngày để lấy về thành show nháp.
+  TASKS_READ_SCOPE: 'https://www.googleapis.com/auth/tasks.readonly',
 };

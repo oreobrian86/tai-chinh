@@ -67,7 +67,7 @@ async function openData() {
     runtime.store = new SheetsStore(google.getToken);
     runtime.session = new DataSession(runtime.store);
     runtime.backups = new Backups(runtime.store, runtime.session);
-    setBackend(new Api(runtime.session, { backups: runtime.backups, calendar: new CalendarSync(google.getToken, undefined, { canRead: google.calendarReadGranted }),
+    setBackend(new Api(runtime.session, { backups: runtime.backups, calendar: new CalendarSync(google.getToken, undefined, { canRead: google.calendarReadGranted, canReadTasks: google.tasksReadGranted }),
       appUrl: location.origin + location.pathname }));
   }
   if (!runtime.store.id) await runtime.store.open();
@@ -246,7 +246,10 @@ async function boot() {
     await start();
     return;
   }
-  loginScreen();
+  if (google.configured() && google.restore()) {  // F5 trong lúc phiên Google còn hạn: vào thẳng
+    try { await openData(); google.init().catch(() => { }); return; }
+    catch (err) { google.forget(); loginScreen({ message: err.message }); }
+  } else loginScreen();
   if (google.configured()) google.init().catch(() => { });  // tải sẵn thư viện đăng nhập
 }
 

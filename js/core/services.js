@@ -14,7 +14,7 @@ export const DEFAULT_EXPENSE_CATEGORIES = [
 export const DEFAULT_INCOME_CATEGORIES = [['Thu nhập khác', '💰', '#7C9A85'], ['Quà tặng', '🎁', '#C77D8E'], ['Hoàn tiền', '↩', '#7C8FA6']];
 export const DEFAULT_SETTINGS = { lock_minutes: 10, exclude_one_off: false, display_name: '', hide_amounts: false,
   gcal_enabled: false, gcal_calendar_id: null, gcal_include_fee: false, gcal_last_sync: null,
-  gcal_import: false, gcal_read_ids: [], gcal_import_keyword: '' };
+  gcal_import: false, gcal_read_ids: [], gcal_import_keyword: '', gcal_import_tasks: true };
 
 export const notFound = what => new AppError(404, 'not_found', `Không tìm thấy ${what}`);
 const owned = (db, table, id, what = 'dữ liệu') => { const r = db.get(table, id); if (!r) throw notFound(what); return r; };
