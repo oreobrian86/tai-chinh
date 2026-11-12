@@ -62,7 +62,7 @@ export async function dashboardView(root) {
       ${runway(f, d)}
     </section>
 
-    ${d.warnings.map(w => `<div class="notice ${w.level === 'danger' ? 'danger' : w.level === 'warn' ? 'warn' : ''}">${h(privacy.on ? w.text.replace(/[\d.]+đ/g, '••••••đ') : w.text)}</div>`).join('')}
+    ${d.warnings.map(w => `<${w.href ? `a href="${h(w.href)}"` : 'div'} class="notice ${w.level === 'danger' ? 'danger' : w.level === 'warn' ? 'warn' : ''}">${h(privacy.on ? w.text.replace(/[\d.]+đ/g, '••••••đ') : w.text)}</${w.href ? 'a' : 'div'}>`).join('')}
 
     <div class="figures">
       <div class="fig"><div class="k">Số dư thực có</div><div class="v">${money(f.balance)}</div><div class="n">${d.accounts.filter(a => !a.archived).length} tài khoản</div></div>

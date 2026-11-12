@@ -1,11 +1,14 @@
-// Đồng bộ MỘT CHIỀU: lịch làm việc trong app → một lịch riêng trên Google Calendar do app tạo.
-// App là nguồn gốc; sửa trên Google Calendar sẽ bị ghi đè ở lần đồng bộ sau.
-// Quyền dùng: calendar.app.created — chỉ quản lý lịch do app tạo, không đọc lịch cá nhân của bạn.
+// Đồng bộ HAI CHIỀU với Google Calendar:
+//  • Đẩy lên: lịch làm việc trong app → một lịch riêng do app tạo (quyền calendar.app.created).
+//    App là nguồn gốc; sửa sự kiện trong lịch riêng này sẽ bị ghi đè ở lần đồng bộ sau.
+//  • Kéo về: sự kiện bạn thêm trong các lịch đã chọn (mặc định lịch chính) → show nháp chưa có giá
+//    (quyền calendar.readonly — chỉ đọc, app không sửa hay xóa lịch cá nhân của bạn).
 import * as fe from './finance.js';
 import { AppError } from './store.js';
 
 const API = 'https://www.googleapis.com/calendar/v3';
 export const CAL_SCOPE = 'https://www.googleapis.com/auth/calendar.app.created';
+export const CAL_READ_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
 export const CAL_NAME = 'Lịch làm việc freelance';
 const TZ = 'Asia/Ho_Chi_Minh';
 const KIND = { shoot: ['🎥', 'Quay', '2'], photo: ['📷', 'Chụp', '7'], edit: ['✂️', 'Dựng', '3'], deadline: ['⚑', 'Hạn bàn giao', '11'], other: ['•', 'Việc', '8'] };
@@ -33,7 +36,7 @@ export function desiredEvents(db, { includeFee = false, appUrl = '' } = {}) {
   const out = [];
   for (const s of db.live('job_sessions')) {
     const j = jobs.get(s.job_id);
-    if (!j) continue;
+    if (!j || s.gcal) continue;  // buổi lấy từ Google Calendar: đã nằm trên lịch của bạn, không đẩy lại
     const [icon, label, color] = KIND[s.kind] || KIND.other;
     const client = clients.get(j.client_id);
     const desc = [`${WORK[j.work_type] || ''}${client ? ` cho ${client}` : ''}`];
@@ -62,9 +65,11 @@ export function desiredEvents(db, { includeFee = false, appUrl = '' } = {}) {
 }
 
 export class CalendarSync {
-  constructor(getToken, fetchImpl = (...a) => fetch(...a)) {
+  /** canRead(): người dùng đã cho phép đọc lịch chưa (mặc định coi như có, để kiểm thử). */
+  constructor(getToken, fetchImpl = (...a) => fetch(...a), { canRead = () => true } = {}) {
     this.getToken = getToken;
     this.fetch = fetchImpl;
+    this.canRead = canRead;
   }
 
   async req(path, { method = 'GET', body } = {}) {
@@ -132,6 +137,28 @@ export class CalendarSync {
     if (!r.ok && r.status !== 404 && r.status !== 410) throw new AppError(r.status, 'gcal_error', `Không xóa được sự kiện (${r.status}).`);
   }
 
+  /** Các lịch bạn có quyền xem (để chọn lịch cần lấy về). */
+  async listCalendars() {
+    const r = await this.json('/users/me/calendarList?minAccessRole=reader&maxResults=250&fields=items(id,summary,summaryOverride,primary,accessRole)');
+    return (r.items || []).map(c => ({ id: c.id, name: c.summaryOverride || c.summary || c.id, primary: !!c.primary }));
+  }
+
+  /** Sự kiện trong khoảng ngày [from, to], đã tách lịch lặp thành từng lần, giờ theo Việt Nam. */
+  async listRange(calId, from, to) {
+    const out = [];
+    let page = '';
+    const q = new URLSearchParams({ singleEvents: 'true', showDeleted: 'false', maxResults: '2500', timeZone: TZ,
+      timeMin: `${from}T00:00:00+07:00`, timeMax: `${fe.addDays(to, 1)}T00:00:00+07:00`,
+      fields: 'items(id,status,summary,location,description,start,end,eventType,recurringEventId,extendedProperties),nextPageToken' });
+    do {
+      if (page) q.set('pageToken', page);
+      const r = await this.json(`/calendars/${encodeURIComponent(calId)}/events?${q}`);
+      out.push(...(r.items || []));
+      page = r.nextPageToken || '';
+    } while (page);
+    return out;
+  }
+
   /** So sánh và chỉ gửi phần khác: thêm mới, sửa, xóa. */
   async sync(calId, desired) {
     const existing = new Map((await this.listEvents(calId)).filter(e => e.status !== 'cancelled').map(e => [e.id, e]));
@@ -149,4 +176,112 @@ export class CalendarSync {
     }
     return stats;
   }
+}
+
+// ================= KÉO VỀ: sự kiện trên Google Calendar → show nháp =================
+
+export const IMPORT_PAST_DAYS = 7;      // lấy cả sự kiện 7 ngày trước
+export const IMPORT_FUTURE_DAYS = 365;  // và 1 năm tới
+const SKIP_TYPES = new Set(['birthday', 'outOfOffice', 'focusTime', 'workingLocation', 'fromGmail']);
+const DEFAULT_KIND = { video: 'shoot', photo: 'photo', edit: 'edit', other: 'shoot' };
+
+export const srcKey = (calId, evId) => `${calId}/${evId}`;
+
+/** Đoán loại việc theo tiêu đề sự kiện. */
+export function guessWorkType(title) {
+  const t = (title || '').toLowerCase();
+  if (/chụp|ảnh|photo|pre.?wedding|kỷ yếu|ky yeu/.test(t)) return 'photo';
+  if (/dựng|edit|hậu kỳ|hau ky|bàn giao/.test(t)) return 'edit';
+  if (/quay|video|phim|film|livestream|sự kiện|cưới|cuoi|event/.test(t)) return 'video';
+  return 'other';
+}
+
+const strip = s => (s || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/[ \t]+/g, ' ').trim();
+
+/** Có nên lấy sự kiện này về không. */
+export function wanted(ev, keyword = '') {
+  if (!ev || ev.status === 'cancelled') return false;
+  if (SKIP_TYPES.has(ev.eventType)) return false;
+  if (ev.recurringEventId) return false;                    // việc lặp lại hằng tuần (tập gym, họp…) không phải show
+  if (ev.extendedProperties?.private?.app === 'finance') return false;  // sự kiện do chính app đẩy lên
+  if (!ev.start || !(ev.start.date || ev.start.dateTime)) return false;
+  const kws = (keyword || '').split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
+  if (kws.length && !kws.some(k => (ev.summary || '').toLowerCase().includes(k))) return false;
+  return true;
+}
+
+/** Ngày giờ của sự kiện → các buổi làm (giờ Việt Nam). */
+export function eventSessions(ev, kind) {
+  if (ev.start.date) {  // cả ngày; có thể kéo dài nhiều ngày (ngày kết thúc không tính)
+    const out = [];
+    const end = ev.end?.date || fe.addDays(ev.start.date, 1);
+    for (let d = ev.start.date; d < end && out.length < 14; d = fe.addDays(d, 1)) out.push({ kind, date: d, start_time: null, end_time: null });
+    return out;
+  }
+  const s = ev.start.dateTime, e = ev.end?.dateTime || s;
+  const date = s.slice(0, 10);
+  const start = s.slice(11, 16);
+  let end = e.slice(0, 10) === date ? e.slice(11, 16) : '23:59';
+  if (!end || end <= start) end = null;
+  return [{ kind, date, start_time: start, end_time: end }];
+}
+
+const evHash = ev => hash(JSON.stringify([ev.summary || '', ev.location || '', ev.description || '', ev.start, ev.end]));
+
+/**
+ * Đưa các sự kiện đã tải về vào dữ liệu app.
+ *  • Sự kiện mới → show nháp (chưa có khách, tiền công 0đ) để bạn điền sau.
+ *  • Sự kiện đã lấy, bị đổi ngày giờ trên Google → cập nhật ngày giờ của show.
+ *  • Sự kiện bị xóa trên Google → xóa show nháp tương ứng (show bạn đã điền thông tin thì giữ lại).
+ *  • Show nháp bạn đã bấm "Không phải show" → không lấy lại nữa.
+ * @param fetched  Map(calId → mảng sự kiện) của những lịch vừa tải thành công.
+ */
+export function applyImport(tx, db, fetched, { from, to, keyword = '' } = {}) {
+  const stats = { added: 0, changed: 0, removed: 0 };
+  const known = new Map();  // srcKey → job (kể cả đã xóa = đã bỏ qua)
+  for (const j of db.all('jobs')) if (j.gcal_src) known.set(j.gcal_src, j);
+  const seen = new Set();
+  for (const [calId, evs] of fetched) {
+    for (const ev of evs) {
+      if (!wanted(ev, keyword)) continue;
+      const key = srcKey(calId, ev.id);
+      seen.add(key);
+      const h = evHash(ev);
+      const job = known.get(key);
+      if (job?.deleted_at) continue;  // đã bấm "Không phải show"
+      if (job && job.gcal_h === h) continue;
+      const title = (strip(ev.summary) || '(Không tiêu đề)').slice(0, 200);
+      const workType = job ? job.work_type : guessWorkType(title);
+      const sessions = eventSessions(ev, DEFAULT_KIND[workType] || 'shoot');
+      const location = strip(ev.location).slice(0, 300) || null;
+      const description = strip(ev.description).slice(0, 1000) || null;
+      if (!job) {
+        const j = tx.insert('jobs', { title, client_id: null, work_type: workType, work_date: sessions[0].date, total_fee: 0, due_date: null,
+          work_status: 'booked', location, description, note: null, draft: 1, gcal_src: key, gcal_h: h });
+        for (const s of sessions) tx.insert('job_sessions', { job_id: j.id, ...s, location, note: null, gcal: 1 });
+        tx.audit('job', j.id, 'gcal_import', { key });
+        stats.added++;
+        continue;
+      }
+      // Đã có: ngày giờ luôn theo Google; tên và nội dung chỉ cập nhật khi show còn là nháp.
+      const set = { gcal_h: h, work_date: sessions[0].date, location };
+      if (job.draft) Object.assign(set, { title, description });
+      tx.update('jobs', job.id, set);
+      for (const s of db.live('job_sessions').filter(s => s.job_id === job.id && s.gcal)) tx.softDelete('job_sessions', s.id);
+      for (const s of sessions) tx.insert('job_sessions', { job_id: job.id, ...s, location, note: null, gcal: 1 });
+      stats.changed++;
+    }
+  }
+  // Sự kiện không còn trên Google (trong khoảng ngày vừa tải) → bỏ show nháp tương ứng.
+  for (const [key, job] of known) {
+    if (job.deleted_at || seen.has(key) || !job.draft) continue;
+    const calId = key.slice(0, key.lastIndexOf('/'));
+    if (!fetched.has(calId) || job.work_date < from || job.work_date > to) continue;
+    if (db.live('transactions').some(t => t.job_id === job.id)) continue;
+    tx.update('jobs', job.id, { gcal_src: null });  // không đánh dấu "bỏ qua": nếu sự kiện được khôi phục thì lấy lại
+    tx.softDelete('jobs', job.id);
+    for (const s of db.live('job_sessions').filter(s => s.job_id === job.id)) tx.softDelete('job_sessions', s.id);
+    stats.removed++;
+  }
+  return stats;
 }

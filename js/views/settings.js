@@ -10,6 +10,8 @@ export async function settingsView(root) {
   const [accounts, backups, settings] = await Promise.all([get('/api/accounts'), get('/api/backups').catch(() => []), get('/api/settings')]);
   const cats = state.categories;
   const info = runtime.store?.info?.() || {};
+  const canRead = !runtime.demo && google.calendarReadGranted();
+  const calList = canRead && settings.gcal_import ? await get('/api/gcal/calendars').catch(() => []) : [];
   root.innerHTML = `<div class="page">
     <div class="page-head"><div><h1>Cài đặt</h1></div></div>
     <div class="grid g2">
@@ -45,16 +47,27 @@ export async function settingsView(root) {
             ${runtime.demo ? '' : '<button class="btn ghost danger" data-logout>Đăng xuất Google</button>'}</div>
         </div></section>
 
-      <section class="panel"><div class="panel-head"><h2>Google Calendar</h2>${settings.gcal_enabled ? '<span class="chip sage">Đang đồng bộ</span>' : ''}</div>
+      <section class="panel"><div class="panel-head"><h2>Google Calendar</h2>${settings.gcal_enabled || settings.gcal_import ? '<span class="chip sage">Đang đồng bộ</span>' : ''}</div>
         ${runtime.demo ? '<p class="muted small">Chế độ dùng thử không đồng bộ Google Calendar.</p>' : `
-        <p class="small muted">Đưa ngày quay, chụp, dựng, hạn bàn giao và ngày nghỉ lên một lịch riêng tên <b>Lịch làm việc freelance</b> trong Google Calendar, để xem cùng lịch cá nhân và nhận nhắc việc trên điện thoại. Đồng bộ một chiều: sửa lịch trong app, Calendar tự cập nhật sau vài giây.</p>
-        ${!google.calendarGranted() ? `<div class="notice warn mt-xs">Lần đăng nhập này chưa có quyền Google Calendar. Đăng xuất Google, đăng nhập lại và tick ô cho phép <b>Lịch</b>.</div>` : ''}
+        <h3>Lấy lịch từ Google Calendar về app</h3>
+        <p class="small muted">Sự kiện bạn thêm trên Google Calendar (trên điện thoại hay máy tính) sẽ tự hiện trong app thành <b>show nháp, chưa có giá</b>. Mở show nháp để điền khách và tiền công, hoặc bấm "Không phải show" nếu đó là việc riêng. Đổi giờ hay xóa sự kiện trên Google thì app tự cập nhật theo. App chỉ đọc, không sửa lịch của bạn.</p>
+        ${!canRead ? `<div class="notice warn mt-xs">Lần đăng nhập này chưa có quyền xem lịch. Bấm <b>Đăng xuất Google</b> ở mục Bảo mật, đăng nhập lại và tick ô cho phép <b>xem lịch</b>.</div>` : ''}
+        ${settings.gcal_import && canRead ? `
+          <div class="field mt-xs"><span>Lấy từ các lịch</span><div class="stack">${calList.filter(c => c.id !== settings.gcal_calendar_id).map(c => `<label class="check"><input type="checkbox" name="gcal_cal" value="${h(c.id)}"${(settings.gcal_read_ids || []).includes(c.id) ? ' checked' : ''}> ${h(c.primary ? `${c.name} (lịch chính)` : c.name)}</label>`).join('') || '<span class="small muted">Không tải được danh sách lịch.</span>'}</div></div>
+          ${field('Chỉ lấy sự kiện có chữ (tùy chọn)', `<input class="input" name="gcal_import_keyword" maxlength="200" value="${h(settings.gcal_import_keyword || '')}" placeholder="Ví dụ: quay, chụp, show">`,
+            'Để trống: lấy mọi sự kiện. Nhiều từ thì cách nhau dấu phẩy. Sinh nhật và việc lặp lại hằng tuần luôn được bỏ qua.')}
+          <div class="row wrap mt-xs"><button class="btn sm sage" data-gimp="save">Lưu và lấy lịch ngay</button><button class="btn sm ghost danger" data-gimp="off">Tắt lấy lịch về</button></div>`
+        : `<div class="row wrap mt-xs"><button class="btn sm sage" data-gimp="on"${canRead ? '' : ' disabled'}>Bật lấy lịch về</button></div>`}
+
+        <h3 class="mt">Đưa lịch làm việc lên Google Calendar</h3>
+        <p class="small muted">Show tạo trong app được đưa lên một lịch riêng tên <b>Lịch làm việc freelance</b>, để xem cùng lịch cá nhân và nhận nhắc việc trên điện thoại. Show lấy từ Google Calendar thì đã có sẵn trên lịch của bạn nên không đưa lên lần nữa.</p>
+        ${!google.calendarGranted() ? `<div class="notice warn mt-xs">Lần đăng nhập này chưa có quyền tạo lịch. Đăng xuất Google, đăng nhập lại và tick ô cho phép <b>Lịch</b>.</div>` : ''}
         <div class="row wrap mt-xs">
-          ${settings.gcal_enabled ? `<button class="btn sm sage" data-gcal="sync">Đồng bộ ngay</button><button class="btn sm ghost danger" data-gcal="disable">Tắt đồng bộ</button>`
-            : `<button class="btn sm sage" data-gcal="enable"${google.calendarGranted() ? '' : ' disabled'}>Bật đồng bộ</button>`}
+          ${settings.gcal_enabled ? `<button class="btn sm sage" data-gcal="sync">Đồng bộ ngay</button><button class="btn sm ghost danger" data-gcal="disable">Tắt đưa lên</button>`
+            : `<button class="btn sm sage" data-gcal="enable"${google.calendarGranted() ? '' : ' disabled'}>Bật đưa lên</button>`}
         </div>
-        ${settings.gcal_last_sync ? `<p class="small faint mt-xs">Lần đồng bộ gần nhất: ${h(new Date(settings.gcal_last_sync).toLocaleString('vi-VN'))}</p>` : ''}
-        <label class="check mt-xs"><input type="checkbox" name="gcal_include_fee"${settings.gcal_include_fee ? ' checked' : ''}> Ghi tiền công vào mô tả sự kiện (lịch có thể hiện trên màn hình khóa điện thoại)</label>`}
+        <label class="check mt-xs"><input type="checkbox" name="gcal_include_fee"${settings.gcal_include_fee ? ' checked' : ''}> Ghi tiền công vào mô tả sự kiện (lịch có thể hiện trên màn hình khóa điện thoại)</label>
+        ${settings.gcal_last_sync ? `<p class="small faint mt-xs">Lần đồng bộ gần nhất: ${h(new Date(settings.gcal_last_sync).toLocaleString('vi-VN'))}</p>` : ''}`}
       </section>
 
       <section class="panel"><div class="panel-head"><h2>Dữ liệu trên Google Drive</h2></div>
@@ -89,15 +102,39 @@ export async function settingsView(root) {
     try {
       if (a === 'disable') {
         await post('/api/gcal/disable');
-        toast('Đã tắt đồng bộ. Lịch trên Google Calendar vẫn giữ nguyên, bạn có thể tự xóa nếu không cần.');
+        toast('Đã tắt đưa lịch lên. Lịch "Lịch làm việc freelance" trên Google Calendar vẫn giữ nguyên, bạn có thể tự xóa nếu không cần.');
       } else {
         const r = await post(a === 'enable' ? '/api/gcal/enable' : '/api/gcal/sync');
-        toast(`Đã đồng bộ: thêm ${r.created}, sửa ${r.updated}, xóa ${r.deleted}`);
+        toast(`Đã đồng bộ: thêm ${r.created}, sửa ${r.updated}, xóa ${r.deleted}${r.imported?.added ? `; lấy về ${r.imported.added} show nháp` : ''}`);
       }
       state.settings = await get('/api/settings');
       await changed();
     } catch (err) {
       if (err.code === 'gcal_api') toast('Cần bật Google Calendar API trong Google Cloud (xem hướng dẫn trong tin nhắn).', 'err');
+      else toastErr(err);
+    }
+  }));
+  on(root, 'click', '[data-gimp]', (e, b) => busy(b, async () => {
+    const a = b.dataset.gimp;
+    try {
+      if (a === 'off') {
+        await post('/api/gcal/import/disable');
+        toast('Đã tắt lấy lịch về. Các show nháp đã lấy vẫn còn trong app.');
+      } else {
+        const body = {};
+        if (a === 'save') {
+          body.calendar_ids = [...root.querySelectorAll('[name=gcal_cal]:checked')].map(x => x.value);
+          if (!body.calendar_ids.length) return toast('Chọn ít nhất một lịch.', 'err');
+          body.keyword = $('[name=gcal_import_keyword]', root).value.trim();
+        }
+        const r = await post('/api/gcal/import', body);
+        const im = r.imported;
+        toast(im.added || im.changed || im.removed ? `Đã lấy về: ${im.added} show nháp mới, cập nhật ${im.changed}, bỏ ${im.removed}` : 'Không có lịch mới.');
+      }
+      state.settings = await get('/api/settings');
+      await changed();
+    } catch (err) {
+      if (err.code === 'gcal_api') toast('Cần bật Google Calendar API trong Google Cloud.', 'err');
       else toastErr(err);
     }
   }));

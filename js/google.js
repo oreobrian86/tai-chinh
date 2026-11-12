@@ -8,6 +8,7 @@ let token = null;
 let expiresAt = 0;
 let waiting = null;
 let calendarOk = false;
+let calendarReadOk = false;
 
 export const configured = () => CONFIG.CLIENT_ID && !CONFIG.CLIENT_ID.startsWith('DAN_CLIENT_ID');
 
@@ -28,7 +29,7 @@ export async function init() {
   if (client) return;
   client = window.google.accounts.oauth2.initTokenClient({
     client_id: CONFIG.CLIENT_ID,
-    scope: [CONFIG.SCOPE, CONFIG.CALENDAR_SCOPE].filter(Boolean).join(' '),
+    scope: [CONFIG.SCOPE, CONFIG.CALENDAR_SCOPE, CONFIG.CALENDAR_READ_SCOPE].filter(Boolean).join(' '),
     include_granted_scopes: true,
     callback: resp => {
       const w = waiting; waiting = null;
@@ -38,6 +39,7 @@ export async function init() {
         return w.reject(new AppError(401, 'google_denied', 'Cần tick ô cho phép ứng dụng truy cập Google Drive.'));
       }
       calendarOk = !!CONFIG.CALENDAR_SCOPE && window.google.accounts.oauth2.hasGrantedAllScopes(resp, CONFIG.CALENDAR_SCOPE);
+      calendarReadOk = !!CONFIG.CALENDAR_READ_SCOPE && window.google.accounts.oauth2.hasGrantedAllScopes(resp, CONFIG.CALENDAR_READ_SCOPE);
       token = resp.access_token;
       expiresAt = Date.now() + (Number(resp.expires_in) || 3600) * 1000;
       w.resolve(token);
@@ -69,6 +71,8 @@ export async function getToken() {
 
 /** Người dùng có tick ô cho phép Google Calendar không. */
 export const calendarGranted = () => calendarOk;
+/** Người dùng có cho phép app đọc lịch (để lấy sự kiện về) không. */
+export const calendarReadGranted = () => calendarReadOk;
 
 export const minutesLeft = () => (token ? Math.max(0, Math.floor((expiresAt - Date.now()) / 60000)) : 0);
 

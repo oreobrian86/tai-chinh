@@ -21,18 +21,21 @@ const jobItem = j => `<a class="item" href="#/job/${h(j.id)}">
 let filter = { month: today().slice(0, 7), status: '', q: '' };
 
 export async function incomeView(root, params) {
-  const sub = params[0] || 'jobs';
+  let sub = params[0] || 'jobs';
+  if (sub === 'draft') { filter = { month: '', status: '', q: '', draft: true }; sub = 'jobs'; params = []; }
   if (sub === 'receivables') return receivablesView(root);
   if (sub === 'other') return otherIncomeView(root);
   const qs = new URLSearchParams();
   if (filter.month) { qs.set('from', filter.month + '-01'); qs.set('to', monthEnd(filter.month + '-01')); }
   if (filter.status) qs.set('status', filter.status);
   if (filter.q) qs.set('q', filter.q);
+  if (filter.draft) qs.set('draft', '1');
   const data = await get('/api/jobs?' + qs);
   root.innerHTML = `<div class="page">
     <div class="page-head"><div><h1>Thu nhập</h1><p class="muted">Mỗi show ghi một lần. Tiền khách trả từng đợt chỉ làm giảm công nợ.</p></div>
       <button class="btn primary" data-new>${icon('plus')}Show mới</button></div>
     <div class="row wrap">${tabs('jobs')}</div>
+    ${filter.draft ? `<div class="notice warn mt">Đang xem show nháp lấy từ Google Calendar. Mở từng show để điền khách và tiền công.</div>` : ''}
     <section class="panel mt">
       <div class="row wrap">
         <input class="input w-auto" type="month" name="month" value="${h(filter.month)}" aria-label="Tháng">
@@ -49,9 +52,9 @@ export async function incomeView(root, params) {
       <div class="list mt">${data.items.length ? data.items.map(jobItem).join('') : empty('🎬', 'Chưa có show nào trong khoảng này.', '<button class="btn" data-new>Thêm show đầu tiên</button>')}</div>
     </section></div>`;
   on(root, 'click', '[data-new]', () => openJobForm());
-  $('[name=month]', root).addEventListener('change', e => { filter.month = e.target.value; incomeView(root, params); });
-  $('[name=status]', root).addEventListener('change', e => { filter.status = e.target.value; incomeView(root, params); });
-  let t; $('[name=q]', root).addEventListener('input', e => { clearTimeout(t); t = setTimeout(() => { filter.q = e.target.value; incomeView(root, params).then(() => { const q = $('[name=q]', root); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }); }, 350); });
+  $('[name=month]', root).addEventListener('change', e => { filter.draft = false; filter.month = e.target.value; incomeView(root, params); });
+  $('[name=status]', root).addEventListener('change', e => { filter.draft = false; filter.status = e.target.value; incomeView(root, params); });
+  let t; $('[name=q]', root).addEventListener('input', e => { clearTimeout(t); t = setTimeout(() => { filter.draft = false; filter.q = e.target.value; incomeView(root, params).then(() => { const q = $('[name=q]', root); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }); }, 350); });
   $('[data-all]', root).addEventListener('click', () => { filter.month = filter.month ? '' : today().slice(0, 7); incomeView(root, params); });
 }
 
@@ -112,6 +115,8 @@ export async function jobView(root, params) {
         ${j.work_status !== 'cancelled' ? `<button class="btn" data-edit>${icon('edit')}Sửa</button>` : ''}
         <button class="btn" data-copy>Nhân bản show</button>
       </div></div>
+    ${j.draft ? `<div class="notice warn draft-notice"><div><b>Show nháp lấy từ Google Calendar.</b> Điền khách và tiền công để app tính công nợ. Nếu đây là việc riêng, bấm "Không phải show", app sẽ không lấy sự kiện này nữa.</div>
+      <div class="row wrap mt-xs"><button class="btn sm sage" data-fill>Điền khách và tiền công</button><button class="btn sm ghost danger" data-notshow>Không phải show</button></div></div>` : ''}
     ${j.conflicts.length ? `<div class="notice danger">Trùng giờ với: ${j.conflicts.map(c => h(c.a_job === j.id ? c.b_title : c.a_title) + ' (' + dmy(c.date) + ')').join(', ')}</div>` : ''}
     <div class="grid g2 mt">
       <section class="panel">
@@ -138,6 +143,7 @@ export async function jobView(root, params) {
           <span class="ic">${s.kind === 'deadline' ? '⚑' : s.kind === 'edit' ? '✂️' : s.kind === 'photo' ? '📷' : '🎥'}</span>
           <span><div class="t">${h(SESSION_KINDS[s.kind])}</div><div class="s">${s.start_time ? `${h(s.start_time)}–${h(s.end_time || '')}` : 'Cả ngày'}${s.location ? `, ${h(s.location)}` : ''}</div></span>
           <span class="v small">${h(niceDate(s.date))}</span></div>`).join('')}</div>
+        ${j.gcal_src ? `<p class="small faint mt-xs">Ngày giờ lấy theo Google Calendar: đổi giờ trên Google Calendar thì app tự cập nhật.</p>` : ''}
         ${j.description ? `<h3 class="mt">Nội dung</h3><p class="muted pre">${h(j.description)}</p>` : ''}
         ${j.note ? `<h3 class="mt">Ghi chú</h3><p class="muted pre">${h(j.note)}</p>` : ''}
       </section>
@@ -149,6 +155,10 @@ export async function jobView(root, params) {
   const reload = () => jobView(root, params);
   $('[data-pay]', root)?.addEventListener('click', () => openPaymentForm(j, reload));
   $('[data-edit]', root)?.addEventListener('click', () => openJobForm(j, { onDone: reload }));
+  $('[data-fill]', root)?.addEventListener('click', () => openJobForm(j, { onDone: reload }));
+  $('[data-notshow]', root)?.addEventListener('click', async () => {
+    try { await del('/api/jobs/' + j.id); toast('Đã bỏ. App sẽ không lấy sự kiện này nữa.'); location.hash = '#/calendar'; await changed(); } catch (e) { toastErr(e); }
+  });
   $('[data-copy]', root)?.addEventListener('click', () => openJobForm(null, { copyFrom: j, onDone: saved => { location.hash = '#/job/' + saved.id; } }));
   $('[data-cancel]', root)?.addEventListener('click', () => {
     if (j.received > 0) openCancelForm(j, reload);

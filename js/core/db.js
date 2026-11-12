@@ -9,8 +9,8 @@ export const SCHEMA = {
   clients: ['id', 'name', 'phone', 'note', ...META],
   categories: ['id', 'name', 'kind', 'icon', 'color', 'sort', 'is_system', ...META],
   jobs: ['id', 'title', 'client_id', 'work_type', 'work_date', 'total_fee', 'due_date', 'work_status', 'cancel_policy',
-    'location', 'description', 'note', ...META],
-  job_sessions: ['id', 'job_id', 'kind', 'date', 'start_time', 'end_time', 'location', 'note', ...META],
+    'location', 'description', 'note', 'draft', 'gcal_src', 'gcal_h', ...META],
+  job_sessions: ['id', 'job_id', 'kind', 'date', 'start_time', 'end_time', 'location', 'note', 'gcal', ...META],
   day_offs: ['id', 'date', 'note', ...META],
   transactions: ['id', 'kind', 'date', 'description', 'category_id', 'job_id', 'obligation_id', 'is_one_off',
     'import_batch_id', 'import_hash', 'note', ...META],
@@ -24,7 +24,7 @@ export const SCHEMA = {
 };
 
 /** Cột kiểu số (tiền là số nguyên VNĐ; cờ đúng/sai lưu 0/1). */
-export const NUMERIC = new Set(['archived', 'sort', 'is_system', 'total_fee', 'is_one_off', 'amount', 'target_amount',
+export const NUMERIC = new Set(['draft', 'gcal', 'archived', 'sort', 'is_system', 'total_fee', 'is_one_off', 'amount', 'target_amount',
   'monthly_plan', 'is_emergency', 'row_count', 'imported_count', 'skipped_count', 'version']);
 
 export const TABLES = Object.keys(SCHEMA);

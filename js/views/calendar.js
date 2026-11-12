@@ -45,7 +45,7 @@ export async function calendarView(root) {
       const cls = ['day', d.slice(0, 7) !== cursor.slice(0, 7) ? 'out' : '', d === t ? 'today' : '', offs.has(d) ? 'off' : '', conflictDays.has(d) ? 'conflict' : ''].join(' ');
       cells.push(`<button class="${cls}" data-day="${d}" aria-label="${h(niceDate(d))}, ${ss.length} việc">
         <span class="dn">${Number(d.slice(8))}</span>
-        ${ss.slice(0, 3).map(s => `<span class="ev ${s.kind} ${s.work_status === 'cancelled' ? 'cancelled' : ''}">${h(evLabel(s))}</span>`).join('')}
+        ${ss.slice(0, 3).map(s => `<span class="ev ${s.kind} ${s.work_status === 'cancelled' ? 'cancelled' : ''}${s.draft ? ' draft' : ''}">${h(evLabel(s))}</span>`).join('')}
         ${ss.length > 3 ? `<span class="faint small">+${ss.length - 3}</span>` : ''}</button>`);
     }
     body = `<div class="cal">${DOWS.map(x => `<div class="dow">${x}</div>`).join('')}${cells.join('')}</div>`;
@@ -57,7 +57,7 @@ export async function calendarView(root) {
         <div class="row"><b>${DOWS[(parseISO(d).getDay() + 6) % 7]} ${dmy(d).slice(0, 5)}</b><span class="spacer"></span>
           <button class="btn sm ghost icon-btn" data-addday="${d}" aria-label="Thêm show ngày này">${icon('plus')}</button></div>
         ${offs.has(d) ? '<p class="small faint">Ngày nghỉ</p>' : ''}
-        ${ss.map(s => `<div class="ev ${s.kind} ${s.work_status === 'cancelled' ? 'cancelled' : ''}" data-job="${h(s.job_id)}" role="button" tabindex="0">
+        ${ss.map(s => `<div class="ev ${s.kind} ${s.work_status === 'cancelled' ? 'cancelled' : ''}${s.draft ? ' draft' : ''}" data-job="${h(s.job_id)}" role="button" tabindex="0">
           <b>${KIND_ICON[s.kind]} ${h(s.title)}</b><br>${s.start_time ? h(s.start_time + '–' + (s.end_time || '')) : 'Cả ngày'}${s.location ? '<br>' + h(s.location) : ''}
           ${conflictIds.has(s.id) ? '<br><b>Trùng giờ</b>' : ''}</div>`).join('')}</div>`);
     }
@@ -106,7 +106,7 @@ const sessionItem = conflictIds => s => `<a class="item" href="#/job/${h(s.job_i
   <span class="ic">${KIND_ICON[s.kind]}</span>
   <span><div class="t">${h(s.title)}${s.work_status === 'cancelled' ? ' (đã hủy)' : ''}</div>
     <div class="s">${h(SESSION_KINDS[s.kind])}, ${s.start_time ? h(s.start_time + '–' + (s.end_time || '')) : 'cả ngày'}${s.location ? ', ' + h(s.location) : ''}${s.client_name ? ', ' + h(s.client_name) : ''}</div></span>
-  <span class="v small">${conflictIds.has(s.id) ? '<span class="chip danger">Trùng giờ</span>' : ''}${s.kind !== 'deadline' ? `<small>${short(s.total_fee)}</small>` : ''}</span></a>`;
+  <span class="v small">${conflictIds.has(s.id) ? '<span class="chip danger">Trùng giờ</span>' : ''}${s.draft ? '<span class="chip amber">Nháp</span>' : s.kind !== 'deadline' ? `<small>${short(s.total_fee)}</small>` : ''}</span></a>`;
 
 function dayPanel(d, ss, off, conflictIds) {
   sheet(niceDate(d), `<div class="stack">

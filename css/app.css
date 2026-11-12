@@ -522,3 +522,7 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 22px 0 16px; }
 .update-bar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 90px; z-index: 90; background: var(--ink); color: var(--on-ink);
   border-radius: 14px; padding: 10px 12px 10px 16px; display: flex; gap: 12px; align-items: center; box-shadow: var(--shadow); font-size: 14px; max-width: 92vw; }
 .update-bar .btn { height: 32px; }
+
+/* show nháp lấy từ Google Calendar: viền nét đứt, chờ điền giá */
+.ev.draft { outline: 1.5px dashed currentColor; outline-offset: -3px; }
+.draft-notice { display: block; }

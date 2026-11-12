@@ -88,7 +88,7 @@ const SessionIn = {
 
 export const S = {
   Settings: { lock_minutes: T.int({ ge: 0, le: 1440 }), exclude_one_off: T.bool(), display_name: T.str({ max: 100 }),
-    hide_amounts: T.bool(), gcal_include_fee: T.bool() },
+    hide_amounts: T.bool(), gcal_include_fee: T.bool(), gcal_import_keyword: T.str({ max: 200 }) },
   Account: { name: Name({ required: true }), kind: T.enum(ACC_KIND, { default: 'cash' }), opening_balance: SignedMoney({ default: 0 }),
     opening_date: T.date(), archived: T.bool() },
   AccountPatch: { name: Name(), kind: T.enum(ACC_KIND), archived: T.bool(), sort: T.int({ lo: -1e9, le: 1e9 }) },

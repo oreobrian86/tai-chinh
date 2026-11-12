@@ -13,7 +13,8 @@ export const DEFAULT_EXPENSE_CATEGORIES = [
 ];
 export const DEFAULT_INCOME_CATEGORIES = [['Thu nhập khác', '💰', '#7C9A85'], ['Quà tặng', '🎁', '#C77D8E'], ['Hoàn tiền', '↩', '#7C8FA6']];
 export const DEFAULT_SETTINGS = { lock_minutes: 10, exclude_one_off: false, display_name: '', hide_amounts: false,
-  gcal_enabled: false, gcal_calendar_id: null, gcal_include_fee: false, gcal_last_sync: null };
+  gcal_enabled: false, gcal_calendar_id: null, gcal_include_fee: false, gcal_last_sync: null,
+  gcal_import: false, gcal_read_ids: [], gcal_import_keyword: '' };
 
 export const notFound = what => new AppError(404, 'not_found', `Không tìm thấy ${what}`);
 const owned = (db, table, id, what = 'dữ liệu') => { const r = db.get(table, id); if (!r) throw notFound(what); return r; };
@@ -390,6 +391,7 @@ export function updateJob(tx, db, id, patch, today) {
   for (const f of ['title', 'work_type', 'work_date', 'total_fee', 'work_status']) if (patch[f] != null) set[f] = patch[f];
   for (const f of ['due_date', 'location', 'description', 'note']) if (f in patch) set[f] = patch[f];
   if ('client_id' in patch || 'client_name' in patch) set.client_id = resolveClient(tx, db, patch.client_id, patch.client_name);
+  if (job.draft) set.draft = 0;  // show nháp từ Google Calendar: lưu form = đã xác nhận
   tx.update('jobs', id, set);
   if (patch.sessions) saveSessions(tx, db, id, patch.sessions);
   tx.audit('job', id, 'update', patch);
@@ -436,7 +438,7 @@ export function cancelJob(tx, db, id, data, today) {
 export function calendarRange(db, start, end, today) {
   const jobs = new Map(fe.jobsWithMoney(db, today).map(j => [j.id, j]));
   const sessions = db.live('job_sessions').filter(s => s.date >= start && s.date <= end && jobs.has(s.job_id))
-    .map(s => { const j = jobs.get(s.job_id); return { ...fe.stripPriv(s), title: j.title, work_type: j.work_type, work_status: j.work_status,
+    .map(s => { const j = jobs.get(s.job_id); return { ...fe.stripPriv(s), title: j.title, work_type: j.work_type, work_status: j.work_status, draft: j.draft || 0,
       total_fee: j.total_fee, client_name: j.client_name, pay_status: j.pay_status, outstanding: j.outstanding }; })
     .sort((a, b) => a.date.localeCompare(b.date) || (a.start_time || '99').localeCompare(b.start_time || '99'));
   const day_offs = db.live('day_offs').filter(d => d.date >= start && d.date <= end).map(fe.stripPriv).sort((a, b) => a.date.localeCompare(b.date));

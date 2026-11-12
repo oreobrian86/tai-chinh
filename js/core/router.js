@@ -6,7 +6,7 @@ import * as rp from './reports.js';
 import * as sv from './services.js';
 import { AppError } from './store.js';
 import { S, parse } from './validate.js';
-import { desiredEvents } from './gcal.js';
+import { applyImport, desiredEvents, IMPORT_FUTURE_DAYS, IMPORT_PAST_DAYS } from './gcal.js';
 
 const pad = n => String(n).padStart(2, '0');
 export const localToday = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
@@ -80,6 +80,8 @@ export class Api {
       const warnings = [];
       if (fc.insufficient_data) warnings.push({ level: 'info', text: 'Dữ liệu chi tiêu còn ít (dưới 14 ngày hoặc dưới 10 khoản chi) nên dự báo chưa chính xác.' });
       if (fc.over_committed) warnings.push({ level: 'danger', text: 'Tiền đã dành và các khoản phải trả đang nhiều hơn số tiền bạn có.' });
+      const drafts = db.live('jobs').filter(j => j.draft && j.work_status !== 'cancelled').length;
+      if (drafts) warnings.push({ level: 'warn', href: '#/income/draft', text: `Có ${drafts} show nháp lấy từ Google Calendar chưa điền khách và tiền công. Bấm để xem.` });
       if (rec.overdue_total > 0) warnings.push({ level: 'warn', text: `Có ${new Intl.NumberFormat('vi-VN').format(rec.overdue_total)}đ công nợ đã quá hạn.` });
       return { today, forecast: fc,
         month: { income: inc.total, job_cash: inc.job_cash, other_income: inc.other, expense: exp, expense_count: cnt, revenue: rev.earned, expected_revenue: rev.expected },
@@ -113,6 +115,7 @@ export class Api {
         (!q.to || j.work_date <= q.to) && (!q.type || j.work_type === q.type) &&
         (!s || j.title.toLowerCase().includes(s) || (clients.get(j.client_id) || '').includes(s)));
       if (q.pay === 'unpaid') items = items.filter(j => j.outstanding > 0);
+      if (q.draft) items = items.filter(j => j.draft);
       const sum = k => items.reduce((a, j) => a + j[k], 0);
       return { items, totals: { fee: sum('expected_revenue'), received: sum('received'), outstanding: sum('outstanding') } };
     }));
@@ -202,23 +205,70 @@ export class Api {
     on('GET', '/api/export/all.json', R((c, db) => ({ __download: {
       filename: `toan-bo-du-lieu-${c.today}.json`, mime: 'application/json', content: JSON.stringify(rp.exportAll(db), null, 1) } })));
 
-    // ---------- Google Calendar (đồng bộ một chiều) ----------
-    const syncCal = async () => {
-      if (!this.calendar) throw new AppError(400, 'demo', 'Chế độ dùng thử không đồng bộ Google Calendar.');
+    // ---------- Google Calendar (hai chiều) ----------
+    const needCal = () => { if (!this.calendar) throw new AppError(400, 'demo', 'Chế độ dùng thử không đồng bộ Google Calendar.'); };
+    const needRead = () => {
+      needCal();
+      if (this.calendar.canRead && !this.calendar.canRead()) {
+        throw new AppError(403, 'gcal_scope', 'Chưa cấp quyền xem lịch. Hãy đăng xuất Google, đăng nhập lại và tick ô cho phép xem lịch.');
+      }
+    };
+    /** Mã thật của lịch chính (để khóa nhận diện sự kiện không đổi theo cách gọi). */
+    const primaryId = async () => (await this.calendar.listCalendars()).find(c => c.primary)?.id || 'primary';
+    // Kéo về: sự kiện trong các lịch đã chọn → show nháp.
+    const pull = async st => {
+      const today = this.today();
+      const from = fe.addDays(today, -IMPORT_PAST_DAYS), to = fe.addDays(today, IMPORT_FUTURE_DAYS);
+      const ids = st.gcal_read_ids?.length ? st.gcal_read_ids : [await primaryId()];
+      const fetched = new Map();
+      for (const id of ids) {
+        try { fetched.set(id, await this.calendar.listRange(id, from, to)); }
+        catch (e) { if (e.status === 404 || e.status === 410) continue; throw e; }  // lịch đã bị xóa / bỏ chia sẻ
+      }
+      return this.write((tx, db) => applyImport(tx, db, fetched, { from, to, keyword: st.gcal_import_keyword }));
+    };
+    // Đẩy lên: lịch làm việc → lịch riêng do app tạo.
+    const push = async st => {
       const db = await this.s.refresh();
-      const st = sv.getSettings(db);
       const calId = await this.calendar.ensureCalendar(st.gcal_calendar_id);
       const stats = await this.calendar.sync(calId, desiredEvents(db, { includeFee: !!st.gcal_include_fee, appUrl: this.appUrl }));
-      await this.write((tx, d) => sv.updateSettings(tx, d, { gcal_enabled: true, gcal_calendar_id: calId, gcal_last_sync: new Date().toISOString() }));
       return { ...stats, calendar_id: calId };
     };
-    on('POST', '/api/gcal/enable', () => syncCal());
+    const syncCal = async ({ forcePush = false } = {}) => {
+      needCal();
+      const st = sv.getSettings(await this.s.refresh());
+      let out = {};
+      const canRead = !this.calendar.canRead || this.calendar.canRead();
+      if (st.gcal_import && canRead) out.imported = await pull(st);
+      if (st.gcal_enabled || forcePush) out = { ...out, ...(await push(st)) };
+      await this.write((tx, d) => sv.updateSettings(tx, d, { ...(out.calendar_id ? { gcal_enabled: true, gcal_calendar_id: out.calendar_id } : {}),
+        gcal_last_sync: new Date().toISOString() }));
+      return out;
+    };
+    on('POST', '/api/gcal/enable', () => syncCal({ forcePush: true }));
     on('POST', '/api/gcal/sync', async () => {
       const st = sv.getSettings(await this.read());
-      if (!st.gcal_enabled) return { skipped: true };
+      if (!st.gcal_enabled && !st.gcal_import) return { skipped: true };
+      if (!this.calendar) return { skipped: true };
       return syncCal();
     });
     on('POST', '/api/gcal/disable', W((c, tx, db) => sv.updateSettings(tx, db, { gcal_enabled: false })));
+    on('GET', '/api/gcal/calendars', async () => { needRead(); return this.calendar.listCalendars(); });
+    // Bật / đổi lựa chọn lấy lịch về: { calendar_ids?: [], keyword?: '' }
+    on('POST', '/api/gcal/import', async ({ body }) => {
+      needRead();
+      const b = body || {};
+      const patch = { gcal_import: true };
+      if (Array.isArray(b.calendar_ids)) patch.gcal_read_ids = b.calendar_ids.filter(x => typeof x === 'string' && x.length < 300).slice(0, 20);
+      if (typeof b.keyword === 'string') patch.gcal_import_keyword = b.keyword.slice(0, 200);
+      const st0 = sv.getSettings(await this.read());
+      if (!(patch.gcal_read_ids || st0.gcal_read_ids)?.length) patch.gcal_read_ids = [await primaryId()];
+      await this.write((tx, db) => sv.updateSettings(tx, db, patch));
+      const imported = await pull(sv.getSettings(await this.s.refresh()));
+      await this.write((tx, d) => sv.updateSettings(tx, d, { gcal_last_sync: new Date().toISOString() }));
+      return { imported };
+    });
+    on('POST', '/api/gcal/import/disable', W((c, tx, db) => sv.updateSettings(tx, db, { gcal_import: false })));
 
     // ---------- sao lưu (Google Drive) ----------
     on('GET', '/api/backups', async () => (this.backups ? this.backups.list() : []));

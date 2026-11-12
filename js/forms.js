@@ -203,7 +203,8 @@ export function openJobForm(job = null, { date, onDone, copyFrom = null } = {}) 
   const first = job?.sessions?.[0] || {};
   const pre = job || copyFrom;  // nhân bản show: điền sẵn từ show cũ nhưng tạo show MỚI
   const pfirst = job ? first : (copyFrom?.sessions?.[0] || {});
-  const recent = job ? [] : (state.recentClients || []).slice(0, 8);
+  const isDraft = !!job?.draft;  // show nháp lấy từ Google Calendar: cho chọn khách quen như show mới
+  const recent = job && !isDraft ? [] : (state.recentClients || []).slice(0, 8);
   const body = `<form class="form" novalidate>
     ${field('Tên show / dự án', `<input class="input" name="title" maxlength="200" value="${h(pre?.title || '')}" placeholder="Ví dụ: Quay cưới Hoàng & Mai" autofocus>`)}
     ${recent.length ? `<div class="field"><span>Khách gần đây (chạm để chọn, tự điền theo show gần nhất)</span><div class="row wrap client-chips">${recent.map(c => `<button type="button" class="chip client-chip" data-client="${h(c.id)}">${h(c.name)}</button>`).join('')}</div></div>` : ''}
@@ -212,7 +213,7 @@ export function openJobForm(job = null, { date, onDone, copyFrom = null } = {}) 
         <datalist id="client-list">${state.clients.map(c => `<option value="${h(c.name)}">`).join('')}</datalist>`)}
       ${field('Loại công việc', `<select class="input" name="work_type">${options(Object.entries(WORK_TYPES), pre?.work_type || 'video')}</select>`)}
     </div>
-    ${field('Tổng tiền công', `<input class="input" name="total_fee" inputmode="numeric" value="${pre ? new Intl.NumberFormat('vi-VN').format(pre.total_fee) : ''}" placeholder="Ví dụ: 1.500.000 hoặc 1tr5">`)}
+    ${field('Tổng tiền công', `<input class="input" name="total_fee" inputmode="numeric" value="${pre && !isDraft ? new Intl.NumberFormat('vi-VN').format(pre.total_fee) : ''}" placeholder="Ví dụ: 1.500.000 hoặc 1tr5">`)}
     <p class="small muted autofill-hint hidden"></p>
     ${job ? '' : `<div class="two">
       ${field('Tiền cọc đã nhận', `<input class="input" name="deposit" inputmode="numeric" placeholder="0">`)}
@@ -244,7 +245,7 @@ export function openJobForm(job = null, { date, onDone, copyFrom = null } = {}) 
     </details>
     <div class="sheet-foot"><button class="btn primary block" type="submit">${job ? 'Lưu show' : 'Tạo show'}</button></div>
   </form>`;
-  sheet(job ? 'Sửa show' : copyFrom ? 'Nhân bản show' : 'Show mới', body, {
+  sheet(isDraft ? 'Điền thông tin show' : job ? 'Sửa show' : copyFrom ? 'Nhân bản show' : 'Show mới', body, {
     onMount(root, close) {
       const form = $('form', root);
       ['total_fee', 'deposit'].forEach(n => form[n] && formatMoneyInput(form[n]));
@@ -252,7 +253,7 @@ export function openJobForm(job = null, { date, onDone, copyFrom = null } = {}) 
       const touched = new Set();
       ['work_type', 'total_fee', 'location', 'start_time', 'end_time'].forEach(n => form[n]?.addEventListener('input', () => touched.add(n)));
       const applyClient = c => {
-        if (!c || job) return;
+        if (!c || (job && !isDraft)) return;
         form.client_name.value = c.name;
         $$('.client-chip', root).forEach(b => b.setAttribute('aria-pressed', String(b.dataset.client === c.id)));
         const L = c.last || {};

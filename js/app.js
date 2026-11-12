@@ -67,7 +67,7 @@ async function openData() {
     runtime.store = new SheetsStore(google.getToken);
     runtime.session = new DataSession(runtime.store);
     runtime.backups = new Backups(runtime.store, runtime.session);
-    setBackend(new Api(runtime.session, { backups: runtime.backups, calendar: new CalendarSync(google.getToken),
+    setBackend(new Api(runtime.session, { backups: runtime.backups, calendar: new CalendarSync(google.getToken, undefined, { canRead: google.calendarReadGranted }),
       appUrl: location.origin + location.pathname }));
   }
   if (!runtime.store.id) await runtime.store.open();
@@ -99,16 +99,28 @@ async function start() {
   scheduleCalendarSync(500);
 }
 
-// ---------- tự đồng bộ Google Calendar (chạy ngầm, chờ 4 giây sau lần sửa cuối) ----------
-let calTimer = null, calWarned = false;
+// ---------- tự đồng bộ Google Calendar (chạy ngầm) ----------
+// Đẩy lên: 4 giây sau lần sửa cuối. Lấy về: khi mở app, khi quay lại app và mỗi 5 phút lúc đang mở.
+let calTimer = null, calWarned = false, calLast = 0;
+const calActive = () => !runtime.demo && state.settings && (
+  (state.settings.gcal_enabled && google.calendarGranted()) || (state.settings.gcal_import && google.calendarReadGranted()));
 function scheduleCalendarSync(delay = 4000) {
-  if (runtime.demo || !state.settings?.gcal_enabled || !google.calendarGranted()) return;
+  if (!calActive()) return;
   clearTimeout(calTimer);
   calTimer = setTimeout(async () => {
-    try { await post('/api/gcal/sync'); calWarned = false; }
-    catch (e) { if (!calWarned && e.code !== 'google_auth') { calWarned = true; toast('Chưa đồng bộ được Google Calendar: ' + e.message, 'err'); } }
+    calLast = Date.now();
+    try {
+      const r = await post('/api/gcal/sync');
+      calWarned = false;
+      const im = r?.imported;
+      if (im && im.added + im.changed + im.removed > 0) {
+        render({ keepScroll: true });
+        if (im.added) toast(`Đã lấy ${im.added} lịch mới từ Google Calendar thành show nháp. Mở show để điền khách và tiền công.`);
+      }
+    } catch (e) { if (!calWarned && e.code !== 'google_auth') { calWarned = true; toast('Chưa đồng bộ được Google Calendar: ' + e.message, 'err'); } }
   }, delay);
 }
+setInterval(() => { if (document.visibilityState === 'visible' && Date.now() - calLast > 4.5 * 60_000) scheduleCalendarSync(0); }, 60_000);
 
 /** Bật/tắt ẩn số tiền (nhớ chung cho mọi thiết bị). */
 export async function togglePrivacy() {
@@ -271,5 +283,6 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && runtime.session?.loadedAt && Date.now() - runtime.session.loadedAt > 15000) {
     runtime.session.backgroundRefresh();
   }
+  if (document.visibilityState === 'visible' && Date.now() - calLast > 60_000) scheduleCalendarSync(1500);
 });
 boot();

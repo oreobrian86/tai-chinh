@@ -129,6 +129,7 @@ export const TX_KINDS = { job_payment: 'Tiền show', job_refund: 'Hoàn cọc',
 
 export function payChip(j) {
   if (j.work_status === 'cancelled') return `<span class="chip">Đã hủy</span>`;
+  if (j.draft) return `<span class="chip amber">Nháp, chưa có giá</span>`;
   if (j.outstanding > 0 && j.overdue_days > 0) return `<span class="chip danger">Quá hạn ${j.overdue_days} ngày</span>`;
   if (j.pay_status === 'paid') return `<span class="chip sage">Đã thanh toán</span>`;
   if (j.pay_status === 'partial') return `<span class="chip amber">Còn ${short(j.outstanding)}</span>`;
