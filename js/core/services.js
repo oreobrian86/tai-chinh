@@ -14,7 +14,7 @@ export const DEFAULT_EXPENSE_CATEGORIES = [
 export const DEFAULT_INCOME_CATEGORIES = [['Thu nhập khác', '💰', '#7C9A85'], ['Quà tặng', '🎁', '#C77D8E'], ['Hoàn tiền', '↩', '#7C8FA6']];
 export const DEFAULT_SETTINGS = { lock_minutes: 10, exclude_one_off: false, display_name: '', hide_amounts: false,
   gcal_enabled: false, gcal_calendar_id: null, gcal_include_fee: false, gcal_last_sync: null,
-  gcal_import: false, gcal_read_ids: [], gcal_import_keyword: '', gcal_import_tasks: true };
+  gcal_import: false, gcal_read_ids: [], gcal_import_keyword: '', gcal_import_tasks: true, monthly_budget: 0 };
 
 export const notFound = what => new AppError(404, 'not_found', `Không tìm thấy ${what}`);
 const owned = (db, table, id, what = 'dữ liệu') => { const r = db.get(table, id); if (!r) throw notFound(what); return r; };
@@ -310,7 +310,7 @@ export function recentClients(db, limit = 12) {
 export function deleteClient(tx, db, id) { owned(db, 'clients', id, 'khách hàng'); tx.softDelete('clients', id); }
 
 // ---------- show ----------
-export const DEFAULT_SESSION_KIND = { video: 'shoot', photo: 'photo', edit: 'edit', other: 'other' };
+export const DEFAULT_SESSION_KIND = { video: 'shoot', video_edit: 'shoot', photo: 'photo', edit: 'edit', other: 'other' };
 
 function saveSessions(tx, db, jobId, sessions) {
   const keep = new Set();
@@ -373,6 +373,8 @@ export function createJob(tx, db, data, today) {
     description: data.description ?? null, note: data.note ?? null });
   const sessions = data.sessions?.length ? data.sessions : [{ kind: DEFAULT_SESSION_KIND[data.work_type], date: data.work_date,
     start_time: data.start_time, end_time: data.end_time, location: data.location }];
+  // Quay + dựng mà chỉ nhập một ngày: thêm ngày dựng là hôm sau (sửa lại được)
+  if (data.work_type === 'video_edit' && !sessions.some(s => s.kind === 'edit')) sessions.push({ kind: 'edit', date: fe.addDays(data.work_date, 1) });
   saveSessions(tx, db, j.id, sessions);
   if (data.deposit > 0) {
     const acc = account(db, data.deposit_account_id);
@@ -526,16 +528,35 @@ export function goalsOverview(db, today) {
 }
 
 // ---------- khoản phải trả ----------
+// Ba loại: bill = chi cố định lặp lại (wifi, CapCut…); debt = trả sau / trả góp nhiều kỳ (SPayLater…); once = trả một lần.
+function normObligation(data, cur = {}) {
+  const kind = data.kind || cur.kind || 'bill';
+  const out = { ...data, kind };
+  if (kind === 'debt') {
+    const total = data.installments ?? cur.installments ?? 1;
+    const no = data.installment_no ?? cur.installment_no ?? 1;
+    if (no > total) throw new AppError(422, 'bad_installment', 'Kỳ hiện tại không được lớn hơn tổng số kỳ.', { installment_no: 'Lớn hơn tổng số kỳ' });
+    Object.assign(out, { installments: total, installment_no: no, recurrence: total > 1 ? 'monthly' : 'none' });
+  } else {
+    Object.assign(out, { installments: null, installment_no: null });
+    if (kind === 'once') out.recurrence = 'none';
+  }
+  return out;
+}
 export function saveObligation(tx, db, data, id = null) {
   if (data.category_id) category(db, data.category_id, 'expense');
   if (id) {
-    owned(db, 'obligations', id, 'khoản phải trả');
+    const cur = owned(db, 'obligations', id, 'khoản phải trả');
+    const d = normObligation(data, cur);
     const set = {};
-    for (const f of ['name', 'amount', 'due_date', 'recurrence', 'category_id', 'note']) if (data[f] != null) set[f] = data[f];
+    for (const f of ['name', 'amount', 'due_date', 'recurrence', 'category_id', 'note', 'kind', 'provider']) if (d[f] != null) set[f] = d[f];
+    set.installments = d.installments; set.installment_no = d.installment_no;
     tx.update('obligations', id, set);
   } else {
-    id = tx.insert('obligations', { name: data.name, amount: data.amount, due_date: data.due_date, recurrence: data.recurrence || 'none',
-      category_id: data.category_id ?? null, note: data.note ?? null }).id;
+    const d = normObligation(data);
+    id = tx.insert('obligations', { name: d.name, amount: d.amount, due_date: d.due_date, recurrence: d.recurrence || 'none',
+      category_id: d.category_id ?? null, note: d.note ?? null, kind: d.kind, provider: d.provider ?? null,
+      installments: d.installments, installment_no: d.installment_no }).id;
   }
   tx.audit('obligation', id, 'save', data);
   return fe.stripPriv(db.get('obligations', id));
@@ -549,13 +570,38 @@ export function payObligation(tx, db, id, data, today) {
     { category_id: o.category_id || systemCategory(db, 'expense'), description: o.name, obligation_id: id });
   tx.update('obligations', id, { paid_transaction_id: tid });
   let nextId = null;
-  if (o.recurrence === 'monthly') {
-    nextId = tx.insert('obligations', { name: o.name, amount: o.amount, due_date: fe.addMonths(o.due_date, 1), recurrence: 'monthly',
-      category_id: o.category_id, note: o.note }).id;
+  const more = o.kind === 'debt' ? (o.installment_no || 1) < (o.installments || 1) : o.recurrence === 'monthly' || o.recurrence === 'yearly';
+  if (more) {
+    nextId = tx.insert('obligations', { name: o.name, amount: o.amount, due_date: fe.addMonths(o.due_date, o.recurrence === 'yearly' ? 12 : 1),
+      recurrence: o.recurrence, category_id: o.category_id, note: o.note, kind: o.kind, provider: o.provider,
+      installments: o.installments, installment_no: o.kind === 'debt' ? (o.installment_no || 1) + 1 : null }).id;
   }
   tx.audit('obligation', id, 'pay', { tx: tid, next: nextId });
   return { transaction_id: tid, next_id: nextId };
 }
+/** Tổng hợp: chi cố định mỗi tháng, nợ trả góp còn lại theo nơi cho vay, khoản sắp/đã quá hạn. */
+export function obligationSummary(db, today) {
+  const unpaid = db.live('obligations').filter(o => !o.paid_transaction_id);
+  const kind = o => o.kind || (o.recurrence === 'monthly' ? 'bill' : 'once');
+  const bills = unpaid.filter(o => kind(o) === 'bill' && (o.recurrence === 'monthly' || o.recurrence === 'yearly'));
+  const fixed_monthly = bills.reduce((a, o) => a + (o.recurrence === 'yearly' ? Math.round(o.amount / 12) : o.amount), 0);
+  const debts = new Map();
+  for (const o of unpaid.filter(o => kind(o) === 'debt')) {
+    const left = (o.installments || 1) - (o.installment_no || 1) + 1;
+    const key = o.provider || o.name;
+    const d = debts.get(key) || { provider: key, remaining: 0, periods_left: 0, next_due: null, next_amount: 0 };
+    d.remaining += o.amount * left; d.periods_left += left;
+    if (!d.next_due || o.due_date < d.next_due) { d.next_due = o.due_date; d.next_amount = o.amount; }
+    debts.set(key, d);
+  }
+  const soon = fe.addDays(today, 3);
+  const due_soon = unpaid.filter(o => o.due_date <= soon).sort((a, b) => a.due_date.localeCompare(b.due_date))
+    .map(o => ({ id: o.id, name: o.name, amount: o.amount, due_date: o.due_date, overdue: o.due_date < today, kind: kind(o),
+      installment_no: o.installment_no, installments: o.installments }));
+  const debtList = [...debts.values()].sort((a, b) => a.next_due.localeCompare(b.next_due));
+  return { fixed_monthly, bill_count: bills.length, debts: debtList, debt_remaining: debtList.reduce((a, d) => a + d.remaining, 0), due_soon };
+}
+
 export function listObligations(db, includePaid) {
   const cats = new Map(db.all('categories').map(c => [c.id, c]));
   return db.live('obligations').filter(o => includePaid || !o.paid_transaction_id)

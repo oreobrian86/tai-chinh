@@ -25,7 +25,7 @@ export function monthlyReport(db, months, today) {
     }).map(s => s.date)).size;
     const saved = db.live('goal_allocations').filter(a => a.date >= ms && a.date <= me).reduce((s, a) => s + a.amount, 0);
     const recv = fe.jobsWithMoney(db, today, j => j.work_date >= ms && j.work_date <= me && j.work_status !== 'cancelled')
-      .reduce((s, j) => s + j.outstanding, 0);
+      .reduce((s, j) => s + j.receivable, 0);
     return { month: m, revenue: rev.earned, revenue_by_type: rev.by_type, jobs_done: rev.jobs_done,
       cash_in: inc.total, job_cash: inc.job_cash, other_income: inc.other, expense: exp, expense_count: cnt,
       net_cashflow: inc.total - exp, receivable_from_month: recv, work_days: workDays,
@@ -36,14 +36,16 @@ export function monthlyReport(db, months, today) {
 }
 
 export function receivablesReport(db, today) {
-  const jobs = fe.jobsWithMoney(db, today, j => j.work_status !== 'cancelled').filter(j => j.outstanding > 0);
+  const all = fe.jobsWithMoney(db, today, j => j.work_status !== 'cancelled');
+  const jobs = all.filter(j => j.receivable > 0);
+  const expected = all.filter(j => j.pending > 0).sort((a, b) => a.work_date.localeCompare(b.work_date));
   const accs = new Map(db.all('accounts').map(a => [a.id, a]));
   const by = new Map();
   for (const j of jobs) {
     const key = j.client_id || '_none';
     if (!by.has(key)) by.set(key, { client_id: j.client_id, client_name: j.client_name || '(Chưa có tên khách)', total: 0, jobs: [], max_overdue: 0 });
     const c = by.get(key);
-    c.total += j.outstanding;
+    c.total += j.receivable;
     c.max_overdue = Math.max(c.max_overdue, j.overdue_days);
     const payments = db.live('transactions').filter(t => t.job_id === j.id && (t.kind === 'job_payment' || t.kind === 'job_refund'))
       .sort((a, b) => a.date.localeCompare(b.date))
@@ -52,7 +54,8 @@ export function receivablesReport(db, today) {
   }
   const clients = [...by.values()].sort((a, b) => b.max_overdue - a.max_overdue || b.total - a.total);
   return { total: clients.reduce((s, c) => s + c.total, 0), overdue_total: jobs.filter(j => j.overdue_days > 0).reduce((s, j) => s + j.outstanding, 0),
-    clients, job_count: jobs.length };
+    clients, job_count: jobs.length,
+    expected: { total: expected.reduce((s, j) => s + j.pending, 0), jobs: expected } };
 }
 
 // ---------- xuất ----------

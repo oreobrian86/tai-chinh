@@ -28,7 +28,7 @@ function runway(f, d) {
   if (f.history_days === 0 && f.balance === 0) headline = `Bắt đầu bằng cách nhập số dư hiện có của từng tài khoản trong <a href="#/settings">Cài đặt</a>, rồi ghi các khoản chi hằng ngày.`;
   else if (f.available <= 0) headline = `Tiền khả dụng đã hết. Hãy xem lại các khoản đã dành và khoản phải trả.`;
   else if (days === null) headline = `Chưa có khoản chi nào để ước tính số ngày đủ dùng.`;
-  else headline = `Với mức chi ${short(f.avg_daily_used)}/ngày, tiền đủ dùng <b>${days} ngày</b>, đến <b>${niceDate(f.out_of_money_date).toLowerCase()}</b>${days > WINDOW ? '' : ''}.`;
+  else headline = `Với mức chi ${short(f.avg_daily_used)}/ngày${f.avg_source === 'budget' ? ' (theo ngân sách, vì chưa đủ lịch sử chi)' : ''}, tiền đủ dùng <b>${days} ngày</b>, đến <b>${niceDate(f.out_of_money_date).toLowerCase()}</b>${days > WINDOW ? '' : ''}.`;
   return `<div class="runway" aria-label="Đường chạy tiền">
       <p class="hero-sub">${headline}${f.insufficient_data && days !== null && f.available > 0 ? ' <span class="chip amber">Dữ liệu còn ít</span>' : ''}</p>
       <div class="runway-track" role="img" aria-label="${days === null ? 'Chưa ước tính được' : `Đủ dùng ${days} ngày`}">
@@ -41,7 +41,7 @@ function runway(f, d) {
 
 export async function dashboardView(root) {
   const [d, rec] = await Promise.all([get('/api/dashboard'), get('/api/receivables')]);
-  d.receivable_marks = rec.clients.flatMap(c => c.jobs.filter(j => j.due_date).map(j => ({ date: j.due_date, amount: j.outstanding })));
+  d.receivable_marks = [...rec.clients.flatMap(c => c.jobs), ...rec.expected.jobs].filter(j => j.due_date).map(j => ({ date: j.due_date, amount: j.outstanding }));
   const f = d.forecast, m = d.month;
   const series = d.series;
   const cats = d.expense_by_category;
@@ -66,7 +66,7 @@ export async function dashboardView(root) {
 
     <div class="figures">
       <div class="fig"><div class="k">Số dư thực có</div><div class="v">${money(f.balance)}</div><div class="n">${d.accounts.filter(a => !a.archived).length} tài khoản</div></div>
-      <div class="fig"><div class="k">Khách còn nợ</div><div class="v">${money(f.receivables)}</div><div class="n">Chưa tính vào tiền có thể tiêu</div></div>
+      <a class="fig" href="#/income/receivables"><div class="k">Công nợ cần thu</div><div class="v">${money(f.receivables)}</div><div class="n">Show đã làm xong, khách chưa trả đủ.${f.expected_income ? ` Dự kiến thêm ${short(f.expected_income)} từ show chưa làm.` : ''}</div></a>
       <div class="fig"><div class="k">Đang dành tiết kiệm</div><div class="v">${money(f.reserved_goals + f.emergency_fund)}</div><div class="n">${f.emergency_fund ? `Dự phòng ${short(f.emergency_fund)}` : 'Mục tiêu và quỹ dự phòng'}</div></div>
       <div class="fig"><div class="k">Sắp phải trả</div><div class="v">${money(f.obligations_due)}</div><div class="n">Đến ${h(dm(f.obligations_until))}</div></div>
     </div>
@@ -75,10 +75,15 @@ export async function dashboardView(root) {
       <section class="panel">
         <div class="panel-head"><h2>Tháng này</h2><a class="btn sm ghost" href="#/reports">Báo cáo</a></div>
         <div class="stats">
-          <div class="stat"><div class="k">Tiền thu về</div><div class="stat-v pos">${money(m.income)}</div><div class="n">Tiền công ${short(m.job_cash)}${m.other_income ? `, thu khác ${short(m.other_income)}` : ''}</div></div>
+          <div class="stat"><div class="k">Tiền thu về</div><div class="stat-v pos">${money(m.income)}</div><div class="n">Tiền thật đã vào tài khoản. Tiền công ${short(m.job_cash)}${m.other_income ? `, thu khác ${short(m.other_income)}` : ''}</div></div>
           <div class="stat"><div class="k">Tiền đã chi</div><div class="stat-v">${money(m.expense)}</div><div class="n">${m.expense_count} khoản chi</div></div>
+          <div class="stat"><div class="k">Thu trừ chi</div><div class="stat-v ${m.income - m.expense < 0 ? 'neg' : 'pos'}">${money(m.income - m.expense, { sign: true })}</div><div class="n">${m.income - m.expense < 0 ? 'Tháng này đang chi nhiều hơn thu' : 'Tháng này đang dư'}</div></div>
+          <div class="stat"><div class="k">Ngân sách tiêu xài</div>${m.budget ? `<div class="stat-v ${m.variable_spent > m.budget ? 'neg' : ''}">${money(m.budget - m.variable_spent)}</div>
+            <div class="n">Còn lại. Đã tiêu ${short(m.variable_spent)} / ${short(m.budget)}${m.fixed_monthly ? `, chi cố định thêm ${short(m.fixed_monthly)}` : ''}</div>
+            <div class="bar mt-xs"><i data-w="${Math.min(100, m.variable_spent / m.budget * 100)}"${m.variable_spent > m.budget ? ' class="over"' : ''}></i></div>`
+            : `<div class="n"><a href="#/expenses/obligations">Đặt ngân sách mỗi tháng</a> để biết còn tiêu được bao nhiêu.</div>`}</div>
           <div class="stat"><div class="k">Doanh thu show đã làm</div><div class="stat-v">${money(m.revenue)}</div><div class="n">Tính theo ngày làm, kể cả chưa thu</div></div>
-          <div class="stat"><div class="k">Show đã nhận, chưa làm</div><div class="stat-v">${money(m.expected_revenue)}</div><div class="n">Doanh thu dự kiến</div></div>
+          <div class="stat"><div class="k">Show tháng này chưa làm</div><div class="stat-v">${money(m.expected_revenue)}</div><div class="n">Dự kiến, chưa phải tiền</div></div>
         </div>
       </section>
       <section class="panel">

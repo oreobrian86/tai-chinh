@@ -1,7 +1,10 @@
 // finance: NƠI DUY NHẤT chứa công thức tiền (chuyển nguyên từ bản Python đã kiểm thử).
 // - Số dư = tổng các dòng giao dịch chưa xóa. Không lưu số dư.
 // - Doanh thu lấy từ show; tiền về lấy từ giao dịch. Không cộng hai nguồn.
-// - Công nợ = tổng công − đã nhận, tính lại mỗi lần. Show hủy → công nợ 0.
+// - Còn thiếu (outstanding) = tổng công − đã nhận, tính lại mỗi lần. Show hủy → 0. Chia làm hai loại:
+//     • Công nợ (receivable): show ĐÃ HOÀN THÀNH (hoặc đã quá hạn thanh toán) mà khách chưa trả đủ.
+//     • Dự kiến (pending): show CHƯA hoàn thành. Chưa làm thì chưa phải nợ, chỉ là tiền dự kiến sẽ thu.
+// - Bấm "Hoàn thành" KHÔNG có nghĩa là có tiền. Tiền chỉ vào khi ghi nhận tiền về (giao dịch).
 // - Chuyển khoản / điều chỉnh không phải thu hay chi. Tiết kiệm không phải chi tiêu.
 // - Công nợ chưa thu KHÔNG BAO GIỜ nằm trong tiền khả dụng.
 
@@ -75,7 +78,10 @@ export function enrichJob(job, received, today) {
   const pay_status = received <= 0 ? 'unpaid' : (received < fee && !cancelled ? 'partial' : 'paid');
   const overdue_days = outstanding > 0 && job.due_date ? Math.max(0, diffDays(job.due_date, today)) : 0;
   const revenue = cancelled ? Math.max(0, received) : job.work_status === 'done' ? fee : 0;
+  const isDebt = outstanding > 0 && (job.work_status === 'done' || overdue_days > 0);
   return { ...job, received, outstanding, pay_status, overdue_days, revenue,
+    receivable: isDebt ? outstanding : 0, pending: isDebt ? 0 : outstanding,
+    money_stage: cancelled ? 'cancelled' : outstanding <= 0 ? 'settled' : isDebt ? 'receivable' : 'expected',
     expected_revenue: cancelled ? 0 : fee, overpaid: cancelled ? 0 : Math.max(0, received - fee) };
 }
 
@@ -100,8 +106,12 @@ export function jobsWithMoney(db, today, filter = () => true) {
 
 export const stripPriv = r => { const o = { ...r }; delete o._row; delete o._new; return o; };
 
+/** Công nợ thật: show đã làm xong (hoặc quá hạn) mà khách chưa trả đủ. */
 export const receivablesTotal = (db, today) =>
-  jobsWithMoney(db, today, j => j.work_status !== 'cancelled').reduce((a, j) => a + j.outstanding, 0);
+  jobsWithMoney(db, today, j => j.work_status !== 'cancelled').reduce((a, j) => a + j.receivable, 0);
+/** Tiền dự kiến: phần chưa thu của các show chưa hoàn thành. */
+export const pendingTotal = (db, today) =>
+  jobsWithMoney(db, today, j => j.work_status !== 'cancelled').reduce((a, j) => a + j.pending, 0);
 
 // ---------- tiết kiệm ----------
 export function goalBalances(db) {
@@ -204,7 +214,7 @@ export function cashPosition(db, today, horizon = 'month_end') {
   const available = balance - regular - emergency - obligationsSum;
   return {
     balance, reserved_goals: regular, emergency_fund: emergency, obligations_due: obligationsSum, obligations_until: until,
-    obligations, receivables: receivablesTotal(db, today),  // chỉ để hiển thị, KHÔNG cộng
+    obligations, receivables: receivablesTotal(db, today), expected_income: pendingTotal(db, today),  // chỉ để hiển thị, KHÔNG cộng
     available, over_committed: available < 0, reserved_exceeds_balance: regular + emergency > balance,
   };
 }
@@ -234,10 +244,12 @@ export function spendingStats(db, today, excludeOneOff = false) {
   };
 }
 
-export function forecast(db, today, excludeOneOff = false) {
+/** budget: ngân sách chi tiêu mỗi tháng (tùy chọn). Chỉ dùng thay mức chi thực tế khi lịch sử chi còn quá ít. */
+export function forecast(db, today, excludeOneOff = false, { budget = 0 } = {}) {
   const pos = cashPosition(db, today);
   const st = spendingStats(db, today, excludeOneOff);
-  const avg = st.avg_daily_30 || st.avg_daily_90;
+  const useBudget = budget > 0 && st.insufficient_data;
+  const avg = useBudget ? Math.round(budget / 30) : st.avg_daily_30 || st.avg_daily_90;
   const available = pos.available;
   const runway = available <= 0 ? 0 : avg > 0 ? Math.floor(available / avg) : null;
   const [mstart, mend] = monthBounds(today);
@@ -250,7 +262,7 @@ export function forecast(db, today, excludeOneOff = false) {
     .reduce((a, j) => a + j.outstanding, 0);
   const projected = pos.balance - avg * diffDays(today, mend) - pos.obligations_due;
   return {
-    ...pos, ...st, avg_daily_used: avg, runway_days: runway,
+    ...pos, ...st, avg_daily_used: avg, avg_source: useBudget ? 'budget' : 'history', runway_days: runway,
     out_of_money_date: runway !== null ? addDays(today, runway) : null,
     days_left_month: daysLeftMonth, safe_daily: safeDaily, weekly_allowance: safeDaily * daysLeftWeek,
     days_left_week: daysLeftWeek, spent_this_week: expensesBetween(db, weekStart, today)[0],

@@ -90,3 +90,17 @@ Chạy kiểm thử (cần Node.js 20+): `node --test tests/*.test.mjs`.
 - Bấm F5 hay mở lại app trong cùng tab thì vào thẳng, không phải đăng nhập lại, trong khoảng 1 giờ kể từ lần đăng nhập (giới hạn của Google). Hết giờ thì app hỏi đăng nhập lại bằng một lần bấm, dữ liệu đang xem không mất.
 - Phiên đăng nhập chỉ nằm trong tab đó (sessionStorage), tự xóa khi đóng tab/app, khi bấm Khóa hoặc khi hết hạn.
 - Tự khóa khi không dùng: chỉnh ở Cài đặt → Bảo mật (mặc định 10 phút).
+
+## Công nợ và tiền dự kiến
+
+- **Tình trạng công việc** (Chưa làm / Đang làm / Đã làm xong) không liên quan đến tiền. Tiền chỉ vào tài khoản khi bấm **Ghi nhận tiền về**.
+- **Dự kiến**: show chưa làm xong đã có giá. **Công nợ**: show đã làm xong (hoặc quá hạn thanh toán) mà khách chưa trả đủ. Cả hai đều không tính vào tiền có thể tiêu.
+
+## Khoản phải trả, ngân sách
+
+- Chi cố định hằng tháng/hằng năm (wifi, CapCut…), trả sau và trả góp nhiều kỳ (SPayLater…). Trả xong kỳ này, kỳ sau tự được thêm; được nhắc trước 3 ngày ở Tổng quan, và trên Google Calendar (9 giờ sáng hôm trước) nếu bật đưa lịch lên.
+- Ngân sách tiêu xài mỗi tháng: đặt ở Chi tiêu → Khoản phải trả.
+
+## Gõ câu ngắn
+
+Bấm **Thêm nhanh → Gõ câu**, mỗi dòng một việc, ví dụ `ăn trưa 45k`, `15/12 quay cưới Linh 6tr5 cọc 2tr`, `anh Minh ck 2tr`, `wifi 220k hàng tháng ngày 5`. App đọc ngay trên máy (không gửi chữ đi đâu), cho xem trước rồi mới lưu.

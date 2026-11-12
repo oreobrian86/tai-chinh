@@ -1,6 +1,6 @@
-import { del, get, post } from '../api.js';
+import { del, get, patch, post } from '../api.js';
 import { openCancelForm, openJobForm, openPaymentForm, openTxEditor } from '../forms.js';
-import { confirmDialog, empty, icon, options, sheet, toast, toastErr } from '../ui.js';
+import { busy, confirmDialog, empty, icon, options, sheet, toast, toastErr } from '../ui.js';
 import {
   $, dmy, h, JOB_STATUS, money, monthEnd, monthStart, niceDate, on, payChip, SESSION_KINDS, short, today, WORK_ICONS, WORK_TYPES,
 } from '../util.js';
@@ -9,7 +9,7 @@ import { changed } from '../state.js';
 
 const tabs = active => `<div class="seg" role="tablist">
   <a class="btn sm ${active === 'jobs' ? '' : 'ghost'}" href="#/income" aria-pressed="${active === 'jobs'}">Show và dự án</a>
-  <a class="btn sm ${active === 'rec' ? '' : 'ghost'}" href="#/income/receivables">Công nợ cần thu</a>
+  <a class="btn sm ${active === 'rec' ? '' : 'ghost'}" href="#/income/receivables">Công nợ &amp; dự kiến</a>
   <a class="btn sm ${active === 'other' ? '' : 'ghost'}" href="#/income/other">Thu khác</a></div>`;
 
 const jobItem = j => `<a class="item" href="#/job/${h(j.id)}">
@@ -46,8 +46,8 @@ export async function incomeView(root, params) {
       <div class="stats mt">
         <div class="stat"><div class="k">Tổng tiền công</div><div class="stat-v">${money(data.totals.fee)}</div></div>
         <div class="stat"><div class="k">Đã nhận</div><div class="stat-v pos">${money(data.totals.received)}</div></div>
-        <div class="stat"><div class="k">Còn phải thu</div><div class="stat-v">${money(data.totals.outstanding)}</div></div>
-        <div class="stat"><div class="k">Số show</div><div class="stat-v">${data.items.length}</div></div>
+        <div class="stat"><div class="k">Công nợ (show đã làm xong)</div><div class="stat-v">${money(data.totals.receivable)}</div></div>
+        <div class="stat"><div class="k">Dự kiến (show chưa làm)</div><div class="stat-v">${money(data.totals.pending)}</div><div class="n">${data.items.length} show</div></div>
       </div>
       <div class="list mt">${data.items.length ? data.items.map(jobItem).join('') : empty('🎬', 'Chưa có show nào trong khoảng này.', '<button class="btn" data-new>Thêm show đầu tiên</button>')}</div>
     </section></div>`;
@@ -61,13 +61,13 @@ export async function incomeView(root, params) {
 async function receivablesView(root) {
   const r = await get('/api/receivables');
   root.innerHTML = `<div class="page">
-    <div class="page-head"><div><h1>Công nợ cần thu</h1><p class="muted">Tiền công đã kiếm nhưng chưa về tài khoản. Không tính vào tiền có thể tiêu.</p></div></div>
+    <div class="page-head"><div><h1>Công nợ và tiền dự kiến</h1><p class="muted"><b>Công nợ</b>: show đã làm xong mà khách chưa trả đủ. <b>Dự kiến</b>: show chưa làm, đã có giá. Cả hai đều chưa phải tiền, không tính vào tiền có thể tiêu. Tiền chỉ vào khi bấm "Ghi nhận tiền về".</p></div></div>
     <div class="row wrap">${tabs('rec')}</div>
     <div class="figures mt">
-      <div class="fig"><div class="k">Tổng chưa thu</div><div class="v">${money(r.total)}</div><div class="n">${r.job_count} show</div></div>
-      <div class="fig"><div class="k">Đã quá hạn</div><div class="v ${r.overdue_total ? 'neg' : ''}">${money(r.overdue_total)}</div><div class="n">Cần nhắc khách</div></div>
-      <div class="fig"><div class="k">Số khách đang nợ</div><div class="v">${r.clients.length}</div><div class="n">&nbsp;</div></div>
-      <div class="fig"><div class="k">Chưa đến hạn</div><div class="v">${money(r.total - r.overdue_total)}</div><div class="n">&nbsp;</div></div>
+      <div class="fig"><div class="k">Công nợ cần thu</div><div class="v">${money(r.total)}</div><div class="n">${r.job_count} show đã làm xong, ${r.clients.length} khách</div></div>
+      <div class="fig"><div class="k">Trong đó quá hạn</div><div class="v ${r.overdue_total ? 'neg' : ''}">${money(r.overdue_total)}</div><div class="n">Cần nhắc khách</div></div>
+      <div class="fig"><div class="k">Tiền dự kiến</div><div class="v">${money(r.expected.total)}</div><div class="n">${r.expected.jobs.length} show chưa làm xong</div></div>
+      <div class="fig"><div class="k">Cộng cả hai</div><div class="v">${money(r.total + r.expected.total)}</div><div class="n">Nếu mọi show đều thu đủ</div></div>
     </div>
     ${r.clients.length ? r.clients.map(c => `<section class="panel">
       <div class="panel-head"><div><h2>${h(c.client_name)}</h2>${c.max_overdue ? `<span class="chip danger">Quá hạn lâu nhất ${c.max_overdue} ngày</span>` : ''}</div>
@@ -79,11 +79,26 @@ async function receivablesView(root) {
           ${j.payments.length ? `<div class="s">Đã trả: ${j.payments.map(p => `${h(dmy(p.date))} ${h(short(p.amount))}`).join('; ')}</div>` : ''}</span>
         <span class="v">${money(j.outstanding)}<small>${payChip(j)}</small>
           <button class="btn sm sage mt-xs" data-pay="${h(j.id)}">Ghi nhận tiền về</button></span></div>`).join('')}</div>
-    </section>`).join('') : `<section class="panel">${empty('✅', 'Không có khoản công nợ nào. Mọi show đã được thanh toán đủ.')}</section>`}
+    </section>`).join('') : `<section class="panel">${empty('✅', 'Không có công nợ. Mọi show đã làm xong đều được trả đủ.')}</section>`}
+    <section class="panel">
+      <div class="panel-head"><h2>Tiền dự kiến</h2><div class="money"><b>${money(r.expected.total)}</b></div></div>
+      <p class="small muted">Show chưa làm xong. Làm xong thì bấm "Đã làm xong", phần còn thiếu sẽ chuyển sang công nợ.</p>
+      <div class="list">${r.expected.jobs.map(j => `<div class="item rec-job" data-job="${h(j.id)}">
+        <span class="ic">${WORK_ICONS[j.work_type]}</span>
+        <span><div class="t">${h(j.title)}${j.client_name ? ` <span class="faint">(${h(j.client_name)})</span>` : ''}</div>
+          <div class="s">Làm ${h(dmy(j.work_date))}, ${h(JOB_STATUS[j.work_status].toLowerCase())}, công ${short(j.total_fee)}${j.received ? `, đã cọc ${short(j.received)}` : ''}</div></span>
+        <span class="v">${money(j.pending)}<small>${payChip(j)}</small>
+          <span class="row wrap mt-xs"><button class="btn sm" data-done="${h(j.id)}">Đã làm xong</button><button class="btn sm ghost" data-pay="${h(j.id)}">Nhận thêm cọc</button></span></span></div>`).join('') || '<p class="muted small">Không có show nào đang chờ làm.</p>'}</div>
+    </section>
   </div>`;
+  on(root, 'click', '[data-done]', (e, b) => busy(b, async () => {
+    e.stopPropagation();
+    try { await patch('/api/jobs/' + b.dataset.done, { work_status: 'done' }); toast('Đã chuyển sang công nợ. Khi khách trả, bấm "Ghi nhận tiền về".'); await changed(); }
+    catch (err) { toastErr(err); }
+  }));
   on(root, 'click', '[data-pay]', async (e, b) => {
     e.stopPropagation();
-    const job = r.clients.flatMap(c => c.jobs).find(j => j.id === b.dataset.pay);
+    const job = [...r.clients.flatMap(c => c.jobs), ...r.expected.jobs].find(j => j.id === b.dataset.pay);
     openPaymentForm(job);
   });
   on(root, 'click', '.rec-job', (e, el) => { if (!e.target.closest('button')) location.hash = '#/job/' + el.dataset.job; });
@@ -112,6 +127,7 @@ export async function jobView(root, params) {
       <p class="muted">${WORK_ICONS[j.work_type]} ${h(WORK_TYPES[j.work_type])}${j.client_name ? `, ${h(j.client_name)}` : ''}, ${h(niceDate(j.work_date))}</p></div>
       <div class="row wrap">
         ${j.work_status !== 'cancelled' && j.outstanding > 0 ? `<button class="btn sage" data-pay>Ghi nhận tiền về</button>` : ''}
+        ${j.work_status === 'booked' || j.work_status === 'in_progress' ? `<button class="btn" data-done>Đã làm xong</button>` : ''}
         ${j.work_status !== 'cancelled' ? `<button class="btn" data-edit>${icon('edit')}Sửa</button>` : ''}
         <button class="btn" data-copy>Nhân bản show</button>
       </div></div>
@@ -124,8 +140,10 @@ export async function jobView(root, params) {
         <div class="job-money">
           <div class="stat"><div class="k">Tổng công</div><div class="stat-v">${money(j.work_status === 'cancelled' ? j.revenue : j.total_fee)}</div></div>
           <div class="stat"><div class="k">Đã nhận</div><div class="stat-v pos">${money(j.received)}</div></div>
-          <div class="stat"><div class="k">Còn nợ</div><div class="stat-v">${money(j.outstanding)}</div></div>
+          <div class="stat"><div class="k">${j.money_stage === 'expected' ? 'Dự kiến thu thêm' : 'Công nợ'}</div><div class="stat-v">${money(j.outstanding)}</div></div>
         </div>
+        ${j.money_stage === 'expected' ? `<p class="small muted stage-note">Show chưa làm xong nên số này mới là <b>dự kiến</b>, chưa tính là công nợ. Làm xong bấm "Đã làm xong".</p>`
+          : j.money_stage === 'receivable' ? `<p class="small muted stage-note">Đã làm xong nhưng khách chưa trả đủ. Tiền chỉ vào tài khoản khi bấm "Ghi nhận tiền về".</p>` : ''}
         <div class="bar"><i data-w="${pct}"></i></div>
         <p class="small muted mt-xs">${j.due_date ? `Hạn thanh toán ${h(dmy(j.due_date))}${j.overdue_days ? `, đã quá ${j.overdue_days} ngày` : ''}.` : 'Chưa đặt hạn thanh toán.'}
           ${j.work_status === 'cancelled' ? (j.cancel_policy === 'keep' ? ' Show đã hủy, giữ lại tiền cọc.' : ' Show đã hủy, đã hoàn cọc.') : ''}</p>
@@ -155,6 +173,13 @@ export async function jobView(root, params) {
   const reload = () => jobView(root, params);
   $('[data-pay]', root)?.addEventListener('click', () => openPaymentForm(j, reload));
   $('[data-edit]', root)?.addEventListener('click', () => openJobForm(j, { onDone: reload }));
+  $('[data-done]', root)?.addEventListener('click', async () => {
+    try {
+      await patch('/api/jobs/' + j.id, { work_status: 'done' });
+      toast(j.outstanding > 0 ? 'Đã làm xong. Phần còn thiếu chuyển sang công nợ, khi khách trả hãy bấm "Ghi nhận tiền về".' : 'Đã làm xong');
+      await changed(); reload();
+    } catch (e) { toastErr(e); }
+  });
   $('[data-fill]', root)?.addEventListener('click', () => openJobForm(j, { onDone: reload }));
   $('[data-notshow]', root)?.addEventListener('click', async () => {
     try { await del('/api/jobs/' + j.id); toast('Đã bỏ. App sẽ không lấy sự kiện này nữa.'); location.hash = '#/calendar'; await changed(); } catch (e) { toastErr(e); }

@@ -235,8 +235,8 @@ export function openJobForm(job = null, { date, onDone, copyFrom = null } = {}) 
       <div class="session-list stack">${(job?.sessions?.length ? job.sessions : [{ date: date || today() }]).map(sessionRow).join('')}</div>
       <button type="button" class="btn sm" data-addsess>Thêm ngày làm</button>
     </div>
-    ${job ? field('Trạng thái', `<select class="input" name="work_status"${job.work_status === 'cancelled' ? ' disabled' : ''}>${options([['booked', 'Đã nhận show'], ['in_progress', 'Đang thực hiện'], ['done', 'Hoàn thành']], job.work_status)}</select>`) :
-      field('Trạng thái', `<select class="input" name="work_status">${options([['booked', 'Đã nhận show (chưa làm)'], ['in_progress', 'Đang thực hiện'], ['done', 'Đã làm xong']], 'booked')}</select>`)}
+    ${field('Tình trạng công việc', `<select class="input" name="work_status"${job?.work_status === 'cancelled' ? ' disabled' : ''}>${options([['booked', 'Chưa làm'], ['in_progress', 'Đang làm'], ['done', 'Đã làm xong']], job?.work_status || 'booked')}</select>`,
+      'Chỉ là tình trạng công việc, không liên quan tiền. Chưa làm xong: tiền còn thiếu là dự kiến. Làm xong: thành công nợ. Tiền chỉ vào khi bấm "Ghi nhận tiền về".')}
     <details class="more"${pre?.description || pre?.note ? ' open' : ''}><summary>Nội dung và ghi chú</summary>
       <div class="form">
         ${field('Nội dung công việc', `<textarea class="input" name="description" maxlength="2000">${h(pre?.description || '')}</textarea>`)}
@@ -277,9 +277,19 @@ export function openJobForm(job = null, { date, onDone, copyFrom = null } = {}) 
             $('[data-f=start_time]', r).value = form.start_time.value;
             $('[data-f=end_time]', r).value = form.end_time.value;
             $('[data-f=location]', r).value = form.location.value;
-            const kindMap = { video: 'shoot', photo: 'photo', edit: 'edit', other: 'other' };
+            const kindMap = { video: 'shoot', video_edit: 'shoot', photo: 'photo', edit: 'edit', other: 'other' };
             $('[data-f=kind]', r).value = kindMap[form.work_type.value];
           }
+        }
+      });
+      // Quay + dựng: tự tách thành ngày quay và ngày dựng (mặc định hôm sau, sửa được)
+      form.work_type.addEventListener('change', () => {
+        if (form.work_type.value !== 'video_edit' || form.multi.checked) return;
+        form.multi.checked = true;
+        form.multi.dispatchEvent(new Event('change'));
+        if (!$$('.session-row', root).some(r => $('[data-f=kind]', r).value === 'edit')) {
+          const d = form.work_date.value || today();
+          $('.session-list', root).insertAdjacentHTML('beforeend', sessionRow({ date: new Date(new Date(d).getTime() + 864e5).toISOString().slice(0, 10), kind: 'edit' }));
         }
       });
       on(root, 'click', '[data-addsess]', () => {
@@ -312,7 +322,7 @@ export function openJobForm(job = null, { date, onDone, copyFrom = null } = {}) 
           body.location = sessions[0]?.location || null;
         } else {
           body.location = d.location || null;
-          const kindMap = { video: 'shoot', photo: 'photo', edit: 'edit', other: 'other' };
+          const kindMap = { video: 'shoot', video_edit: 'shoot', photo: 'photo', edit: 'edit', other: 'other' };
           if (job) sessions = [{ id: first.id, kind: first.kind || kindMap[d.work_type], date: d.work_date,
             start_time: d.start_time || null, end_time: d.end_time || null, location: d.location || null }];
           else { body.start_time = d.start_time || null; body.end_time = d.end_time || null; }
@@ -396,9 +406,9 @@ export function openTxEditor(tx, onDone) {
 }
 
 // ---------- thêm nhanh ----------
-export function openQuickAdd(initial = 'expense') {
+export function openQuickAdd(initial = 'text') {
   sheet('Thêm nhanh', `<div class="seg qa-seg" role="group" aria-label="Loại">
-      <button data-k="expense">Chi</button><button data-k="payment">Khách trả</button>
+      <button data-k="text">Gõ câu</button><button data-k="expense">Chi</button><button data-k="payment">Khách trả</button>
       <button data-k="other_income">Thu khác</button><button data-k="transfer">Chuyển</button><button data-k="job">Show mới</button>
     </div><div class="qa-body"></div>`, {
     onMount(root, close) {
@@ -406,7 +416,8 @@ export function openQuickAdd(initial = 'expense') {
       const show = k => {
         $$('.qa-seg button', root).forEach(b => b.setAttribute('aria-pressed', String(b.dataset.k === k)));
         bodyEl.innerHTML = '';
-        if (k === 'expense' || k === 'other_income') renderMoneyForm(bodyEl, { kind: k, close });
+        if (k === 'text') renderTextEntry(bodyEl, { close });
+        else if (k === 'expense' || k === 'other_income') renderMoneyForm(bodyEl, { kind: k, close });
         else if (k === 'transfer') renderTransferForm(bodyEl, { close });
         else if (k === 'payment') renderPaymentForm(bodyEl, { close }).catch(toastErr);
         else if (k === 'job') { close(); openJobForm(); }
@@ -417,6 +428,62 @@ export function openQuickAdd(initial = 'expense') {
       show(initial);
     },
   });
+}
+
+// ---------- gõ câu ngắn: app tự hiểu ----------
+const QT = { expense: ['Chi', ''], other_income: ['Thu', 'sage'], job: ['Show mới', 'mist'], payment: ['Khách trả', 'sage'], obligation: ['Phải trả', 'amber'], unknown: ['Chưa hiểu', 'danger'] };
+let lastText = '';
+function renderTextEntry(el, { close }) {
+  el.innerHTML = `<div class="form">
+    <label class="field"><span>Mỗi dòng một việc, gõ như nhắn tin. Có dấu hay không dấu đều được.</span>
+      <textarea class="input qt-text" rows="5" maxlength="5000" placeholder="ăn trưa 45k&#10;cf 30k momo hôm qua&#10;15/12 quay cưới Linh 6tr5 cọc 2tr khách Studio Mây&#10;anh Minh chuyển khoản 2tr&#10;wifi 220k hàng tháng ngày 5&#10;spaylater 1tr2 3 kỳ ngày 15">${h(lastText)}</textarea></label>
+    <details class="more"><summary>Xem các kiểu câu app hiểu</summary><ul class="small muted qt-help">
+      <li><b>Chi:</b> "ăn trưa 45k", "đổ xăng 80k tiền mặt", "mua thẻ nhớ 1tr2 ck 10/11"</li>
+      <li><b>Thu khác:</b> "bán lens cũ 3tr5", "hoàn tiền shopee 120k"</li>
+      <li><b>Show mới:</b> "thứ 7 quay + dựng sự kiện ABC 6h-11h tại GEM 8tr cọc 2tr", "20/12 chụp kỷ yếu 3tr cho chị Lan"</li>
+      <li><b>Khách trả:</b> "anh Minh chuyển khoản 2tr", "Linh trả nốt 4tr" (tìm show đang nợ theo tên)</li>
+      <li><b>Chi cố định:</b> "wifi 220k hàng tháng ngày 5", "gia hạn capcut 1tr2 mỗi năm 3/1"</li>
+      <li><b>Trả sau, trả góp:</b> "spaylater 1tr250 3 kỳ ngày 15", "trả góp điện thoại kỳ 2/6 1tr5 ngày 20"</li>
+      <li>Ngày: hôm nay, hôm qua, mai, thứ 7, cn, 15/12, ngày 5. Tài khoản: tiền mặt, ck, momo hoặc tên tài khoản của bạn.</li></ul></details>
+    <button type="button" class="btn primary block" data-read>Đọc</button>
+    <div class="qt-preview"></div></div>`;
+  const ta = $('.qt-text', el), pv = $('.qt-preview', el);
+  if (window.matchMedia('(min-width: 861px)').matches) ta.focus();
+  let items = [];
+  const draw = () => {
+    const n = items.filter(i => i.on).length;
+    pv.innerHTML = `<div class="list mt">${items.map((it, i) => `<div class="item qt-item${it.type === 'unknown' ? ' muted' : ''}">
+      <span class="ic"><input type="checkbox" data-i="${i}"${it.on ? ' checked' : ''}${it.ok ? '' : ' disabled'} aria-label="Chọn dòng ${i + 1}"></span>
+      <span><div class="t"><span class="chip ${QT[it.type][1]}">${QT[it.type][0]}</span> ${h(it.summary)}</div>
+        <div class="s faint">"${h(it.line)}"</div>
+        ${it.warnings.map(w => `<div class="s qt-warn">${h(w)}</div>`).join('')}</span>
+      <span class="v">${it.type === 'job' ? `<button type="button" class="btn sm ghost" data-edit-i="${i}">Sửa rồi lưu</button>` : ''}</span></div>`).join('')}</div>
+      ${items.length ? `<button type="button" class="btn primary block mt" data-save${n ? '' : ' disabled'}>Lưu ${n} mục</button>` : ''}`;
+  };
+  const read = () => busy($('[data-read]', el), async () => {
+    lastText = ta.value;
+    if (!ta.value.trim()) return toast('Gõ ít nhất một dòng', 'err');
+    try { items = (await post('/api/quick/parse', { text: ta.value })).items.map(it => ({ ...it, on: it.ok })); draw(); }
+    catch (err) { toastErr(err); }
+  });
+  on(el, 'click', '[data-read]', read);
+  ta.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); read(); } });
+  on(el, 'change', '[data-i]', (e, cb) => { items[+cb.dataset.i].on = cb.checked; draw(); });
+  on(el, 'click', '[data-edit-i]', (e, b) => {
+    const it = items[+b.dataset.editI], d = it.data;
+    close();
+    openJobForm(null, { date: d.work_date, copyFrom: { title: d.title, client_name: d.client_name, work_type: d.work_type, total_fee: d.total_fee,
+      location: d.location, description: null, sessions: [{ start_time: d.start_time, end_time: d.end_time, location: d.location }] } });
+  });
+  on(el, 'click', '[data-save]', (e, b) => busy(b, async () => {
+    const chosen = items.filter(i => i.on).map(i => ({ type: i.type, data: i.data }));
+    try {
+      const r = await post('/api/quick/commit', { items: chosen });
+      lastText = '';
+      toast(`Đã lưu ${r.saved} mục`);
+      close(); await changed();
+    } catch (err) { toastErr(err); }
+  }));
 }
 
 export { WORK_ICONS };

@@ -14,7 +14,7 @@ const TASKS_API = 'https://tasks.googleapis.com/tasks/v1';
 export const CAL_NAME = 'Lịch làm việc freelance';
 const TZ = 'Asia/Ho_Chi_Minh';
 const KIND = { shoot: ['🎥', 'Quay', '2'], photo: ['📷', 'Chụp', '7'], edit: ['✂️', 'Dựng', '3'], deadline: ['⚑', 'Hạn bàn giao', '11'], other: ['•', 'Việc', '8'] };
-const WORK = { video: 'Quay phim', edit: 'Dựng phim', photo: 'Chụp ảnh', other: 'Khác' };
+const WORK = { video: 'Quay phim', video_edit: 'Quay + dựng', edit: 'Dựng phim', photo: 'Chụp ảnh', other: 'Khác' };
 
 /** Mã sự kiện cố định theo mã buổi làm (Google chỉ cho chữ a–v và số 0–9). */
 export const eventId = (prefix, uuid) => (prefix + uuid.replace(/-/g, '')).toLowerCase();
@@ -61,6 +61,15 @@ export function desiredEvents(db, { includeFee = false, appUrl = '' } = {}) {
   for (const d of db.live('day_offs')) {
     out.push({ id: eventId('o', d.id), summary: `Ngày nghỉ${d.note ? `: ${d.note}` : ''}`, location: '', description: '', colorId: '8',
       start: { date: d.date }, end: { date: fe.addDays(d.date, 1) }, transparency: 'transparent' });
+  }
+  // Khoản phải trả chưa trả (wifi, CapCut, kỳ SPayLater…): sự kiện cả ngày, nhắc lúc 9 giờ sáng hôm trước.
+  const fmt = n => new Intl.NumberFormat('vi-VN').format(n);
+  for (const o of db.live('obligations').filter(o => !o.paid_transaction_id)) {
+    const period = o.kind === 'debt' && o.installments > 1 ? ` (kỳ ${o.installment_no}/${o.installments})` : '';
+    out.push({ id: eventId('b', o.id), summary: `💳 Hạn trả: ${o.name}${period}${includeFee ? ` ${fmt(o.amount)}đ` : ''}`, location: '',
+      description: [includeFee ? `Số tiền: ${fmt(o.amount)}đ` : '', o.note || '', appUrl ? `Ghi nhận đã trả trong app: ${appUrl}#/expenses/obligations` : ''].filter(Boolean).join('\n'),
+      colorId: '6', start: { date: o.due_date }, end: { date: fe.addDays(o.due_date, 1) }, transparency: 'transparent',
+      reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 900 }] } });
   }
   for (const e of out) e.extendedProperties = { private: { app: 'finance', h: hash(JSON.stringify(e)) } };
   return out;
@@ -212,13 +221,14 @@ export class CalendarSync {
 export const IMPORT_PAST_DAYS = 7;      // lấy cả sự kiện 7 ngày trước
 export const IMPORT_FUTURE_DAYS = 365;  // và 1 năm tới
 const SKIP_TYPES = new Set(['birthday', 'outOfOffice', 'focusTime', 'workingLocation', 'fromGmail']);
-const DEFAULT_KIND = { video: 'shoot', photo: 'photo', edit: 'edit', other: 'shoot' };
+const DEFAULT_KIND = { video: 'shoot', video_edit: 'shoot', photo: 'photo', edit: 'edit', other: 'shoot' };
 
 export const srcKey = (calId, evId) => `${calId}/${evId}`;
 
 /** Đoán loại việc theo tiêu đề sự kiện. */
 export function guessWorkType(title) {
   const t = (title || '').toLowerCase();
+  if (/quay/.test(t) && /dựng|edit|hậu kỳ/.test(t)) return 'video_edit';
   if (/chụp|ảnh|photo|pre.?wedding|kỷ yếu|ky yeu/.test(t)) return 'photo';
   if (/dựng|edit|hậu kỳ|hau ky|bàn giao/.test(t)) return 'edit';
   if (/quay|video|phim|film|livestream|sự kiện|cưới|cuoi|event/.test(t)) return 'video';

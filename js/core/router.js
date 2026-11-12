@@ -6,6 +6,7 @@ import * as rp from './reports.js';
 import * as sv from './services.js';
 import { AppError } from './store.js';
 import { S, parse } from './validate.js';
+import { parseQuick } from './nlp.js';
 import { applyImport, desiredEvents, IMPORT_FUTURE_DAYS, IMPORT_PAST_DAYS } from './gcal.js';
 
 const pad = n => String(n).padStart(2, '0');
@@ -63,7 +64,8 @@ export class Api {
     // ---------- tổng quan ----------
     on('GET', '/api/dashboard', R(({ today }, db) => {
       const st = sv.getSettings(db);
-      const fc = fe.forecast(db, today, !!st.exclude_one_off);
+      const fc = fe.forecast(db, today, !!st.exclude_one_off, { budget: st.monthly_budget || 0 });
+      const obl = sv.obligationSummary(db, today);
       const [ms, me] = fe.monthBounds(today);
       const inc = fe.incomeBetween(db, ms, me);
       const [exp, cnt] = fe.expensesBetween(db, ms, me);
@@ -82,15 +84,29 @@ export class Api {
       if (fc.over_committed) warnings.push({ level: 'danger', text: 'Tiền đã dành và các khoản phải trả đang nhiều hơn số tiền bạn có.' });
       const drafts = db.live('jobs').filter(j => j.draft && j.work_status !== 'cancelled').length;
       if (drafts) warnings.push({ level: 'warn', href: '#/income/draft', text: `Có ${drafts} show nháp lấy từ Google Calendar chưa điền khách và tiền công. Bấm để xem.` });
+      // show đã qua ngày làm (buổi cuối) mà chưa bấm "Đã làm xong": tiền của nó vẫn nằm ở "dự kiến"
+      const lastDay = new Map();
+      for (const s of db.live('job_sessions')) if (!lastDay.has(s.job_id) || s.date > lastDay.get(s.job_id)) lastDay.set(s.job_id, s.date);
+      const stale = [...jobs.values()].filter(j => (j.work_status === 'booked' || j.work_status === 'in_progress') && !j.draft
+        && (lastDay.get(j.id) || j.work_date) < today);
+      if (stale.length) warnings.push({ level: 'info', href: '#/income/receivables', text: `Có ${stale.length} show đã qua ngày làm nhưng chưa đánh dấu "Đã làm xong". Đánh dấu để chuyển tiền còn thiếu sang công nợ.` });
+      for (const o of obl.due_soon.slice(0, 4)) {
+        const period = o.kind === 'debt' && o.installments > 1 ? ` kỳ ${o.installment_no}/${o.installments}` : '';
+        warnings.push({ level: o.overdue ? 'danger' : 'warn', href: '#/expenses/obligations',
+          text: `${o.overdue ? 'Quá hạn' : 'Sắp đến hạn'}: ${o.name}${period}, ${new Intl.NumberFormat('vi-VN').format(o.amount)}đ, hạn ${o.due_date.slice(8)}/${o.due_date.slice(5, 7)}.` });
+      }
       if (rec.overdue_total > 0) warnings.push({ level: 'warn', text: `Có ${new Intl.NumberFormat('vi-VN').format(rec.overdue_total)}đ công nợ đã quá hạn.` });
       return { today, forecast: fc,
-        month: { income: inc.total, job_cash: inc.job_cash, other_income: inc.other, expense: exp, expense_count: cnt, revenue: rev.earned, expected_revenue: rev.expected },
+        month: { income: inc.total, job_cash: inc.job_cash, other_income: inc.other, expense: exp, expense_count: cnt, revenue: rev.earned, expected_revenue: rev.expected,
+          budget: st.monthly_budget || 0, fixed_monthly: obl.fixed_monthly,
+          variable_spent: db.live('transactions').filter(t => t.kind === 'expense' && !t.obligation_id && t.date >= ms && t.date <= me).reduce((a, t) => a - fe.txSum(db, t), 0) },
+        obligations: { fixed_monthly: obl.fixed_monthly, debt_remaining: obl.debt_remaining },
         series, expense_by_category: fe.expenseByCategory(db, ms, me), revenue_by_type: byType, upcoming,
-        receivables: { total: rec.total, overdue_total: rec.overdue_total, job_count: rec.job_count,
+        receivables: { total: rec.total, overdue_total: rec.overdue_total, job_count: rec.job_count, expected_total: rec.expected.total,
           top: rec.clients.slice(0, 5).map(c => ({ client_name: c.client_name, total: c.total, max_overdue: c.max_overdue })) },
         accounts: fe.accountBalances(db), warnings };
     }));
-    on('GET', '/api/forecast', R(({ today }, db) => fe.forecast(db, today, !!sv.getSettings(db).exclude_one_off)));
+    on('GET', '/api/forecast', R(({ today }, db) => { const st = sv.getSettings(db); return fe.forecast(db, today, !!st.exclude_one_off, { budget: st.monthly_budget || 0 }); }));
 
     // ---------- tài khoản / danh mục / khách ----------
     on('GET', '/api/accounts', R((c, db) => fe.accountBalances(db)));
@@ -117,7 +133,8 @@ export class Api {
       if (q.pay === 'unpaid') items = items.filter(j => j.outstanding > 0);
       if (q.draft) items = items.filter(j => j.draft);
       const sum = k => items.reduce((a, j) => a + j[k], 0);
-      return { items, totals: { fee: sum('expected_revenue'), received: sum('received'), outstanding: sum('outstanding') } };
+      return { items, totals: { fee: sum('expected_revenue'), received: sum('received'), outstanding: sum('outstanding'),
+        receivable: sum('receivable'), pending: sum('pending') } };
     }));
     on('POST', '/api/jobs', W((c, tx, db) => sv.createJob(tx, db, c.body, c.today)), S.Job);
     on('GET', '/api/jobs/{id}', R((c, db) => sv.getJob(db, c.p.id, c.today)));
@@ -160,6 +177,7 @@ export class Api {
     on('POST', '/api/goals/{id}/allocations', W((c, tx, db) => sv.allocate(tx, db, c.p.id, c.body, c.today)), S.Allocation);
     on('DELETE', '/api/allocations/{id}', W((c, tx, db) => { sv.deleteAllocation(tx, db, c.p.id); return { ok: true }; }));
     on('GET', '/api/obligations', R((c, db) => sv.listObligations(db, c.q.all === '1')));
+    on('GET', '/api/obligations/summary', R((c, db) => sv.obligationSummary(db, c.today)));
     on('POST', '/api/obligations', W((c, tx, db) => sv.saveObligation(tx, db, c.body)), S.Obligation);
     on('PATCH', '/api/obligations/{id}', W((c, tx, db) => sv.saveObligation(tx, db, c.body, c.p.id)), S.ObligationPatch);
     on('DELETE', '/api/obligations/{id}', W((c, tx, db) => { sv.deleteObligation(tx, db, c.p.id); return { ok: true }; }));
@@ -277,6 +295,32 @@ export class Api {
       return { imported };
     });
     on('POST', '/api/gcal/import/disable', W((c, tx, db) => sv.updateSettings(tx, db, { gcal_import: false })));
+
+    // ---------- nhập nhanh bằng câu ngắn ----------
+    on('POST', '/api/quick/parse', R(({ body, today }, db) => {
+      const ctx = { today, accounts: fe.accountBalances(db), categories: db.live('categories').map(fe.stripPriv),
+        clients: db.live('clients').map(c => ({ id: c.id, name: c.name })),
+        jobs: fe.jobsWithMoney(db, today, j => j.work_status !== 'cancelled').filter(j => j.outstanding > 0) };
+      return { items: parseQuick(String(body?.text || '').slice(0, 5000), ctx) };
+    }));
+    on('POST', '/api/quick/commit', ({ body, today }) => this.write((tx, db) => {
+      const items = Array.isArray(body?.items) ? body.items.slice(0, 50) : [];
+      let saved = 0;
+      items.forEach((it, i) => {
+        try {
+          if (it.type === 'expense' || it.type === 'other_income') sv.createTx(tx, db, parse(S.Tx, it.data), today);
+          else if (it.type === 'job') sv.createJob(tx, db, parse(S.Job, it.data), today);
+          else if (it.type === 'payment') sv.addPayment(tx, db, String(it.data?.job_id || ''), parse(S.Payment, it.data), today);
+          else if (it.type === 'obligation') sv.saveObligation(tx, db, parse(S.Obligation, it.data));
+          else return;
+          saved++;
+        } catch (e) {
+          const err = new AppError(e.status || 422, e.code || 'quick_error', `Dòng ${i + 1}: ${e.message}`, e.fields);
+          throw err;
+        }
+      });
+      return { saved };
+    }));
 
     // ---------- sao lưu (Google Drive) ----------
     on('GET', '/api/backups', async () => (this.backups ? this.backups.list() : []));

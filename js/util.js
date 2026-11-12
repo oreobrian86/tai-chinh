@@ -119,10 +119,10 @@ export function on(root, event, selector, fn) {
 
 export const debounce = (fn, ms = 300) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
-export const WORK_TYPES = { video: 'Quay phim', edit: 'Dựng phim', photo: 'Chụp ảnh', other: 'Khác' };
-export const WORK_ICONS = { video: '🎥', edit: '✂️', photo: '📷', other: '•' };
+export const WORK_TYPES = { video: 'Quay phim', video_edit: 'Quay + dựng', edit: 'Dựng phim', photo: 'Chụp ảnh', other: 'Khác' };
+export const WORK_ICONS = { video: '🎥', video_edit: '🎬', edit: '✂️', photo: '📷', other: '•' };
 export const SESSION_KINDS = { shoot: 'Ngày quay', photo: 'Ngày chụp', edit: 'Ngày dựng', deadline: 'Hạn bàn giao', other: 'Khác' };
-export const JOB_STATUS = { booked: 'Đã nhận show', in_progress: 'Đang thực hiện', done: 'Hoàn thành', cancelled: 'Đã hủy' };
+export const JOB_STATUS = { booked: 'Chưa làm', in_progress: 'Đang làm', done: 'Đã làm xong', cancelled: 'Đã hủy' };
 export const PAY_STATUS = { unpaid: 'Chưa thanh toán', partial: 'Thanh toán một phần', paid: 'Đã thanh toán' };
 export const ACCOUNT_KINDS = { cash: 'Tiền mặt', bank: 'Ngân hàng', ewallet: 'Ví điện tử', savings: 'Tiết kiệm', other: 'Khác' };
 export const TX_KINDS = { job_payment: 'Tiền show', job_refund: 'Hoàn cọc', other_income: 'Thu khác', expense: 'Chi', transfer: 'Chuyển khoản', adjustment: 'Điều chỉnh số dư' };
@@ -131,7 +131,8 @@ export function payChip(j) {
   if (j.work_status === 'cancelled') return `<span class="chip">Đã hủy</span>`;
   if (j.draft) return `<span class="chip amber">Nháp, chưa có giá</span>`;
   if (j.outstanding > 0 && j.overdue_days > 0) return `<span class="chip danger">Quá hạn ${j.overdue_days} ngày</span>`;
-  if (j.pay_status === 'paid') return `<span class="chip sage">Đã thanh toán</span>`;
-  if (j.pay_status === 'partial') return `<span class="chip amber">Còn ${short(j.outstanding)}</span>`;
-  return `<span class="chip mist">Chưa nhận tiền</span>`;
+  if (j.pay_status === 'paid' || j.outstanding <= 0) return `<span class="chip sage">Đã nhận đủ tiền</span>`;
+  if (j.money_stage === 'expected') return j.received > 0 ? `<span class="chip mist">Đã cọc ${short(j.received)}</span>` : `<span class="chip mist">Dự kiến, chưa làm</span>`;
+  if (j.received > 0) return `<span class="chip amber">Công nợ ${short(j.outstanding)}</span>`;
+  return `<span class="chip amber">Công nợ, chưa trả đồng nào</span>`;
 }

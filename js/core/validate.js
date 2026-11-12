@@ -77,7 +77,7 @@ const PosMoney = (o = {}) => T.int({ gt: 0, ...o });
 const SignedMoney = (o = {}) => T.int(o);
 const Text = () => T.str({ max: 2000 });
 const Name = (o = {}) => T.str({ min: 1, max: 200, ...o });
-const WORK_TYPE = ['video', 'edit', 'photo', 'other'];
+const WORK_TYPE = ['video', 'video_edit', 'edit', 'photo', 'other'];
 const ACC_KIND = ['cash', 'bank', 'ewallet', 'savings', 'other'];
 
 const SessionIn = {
@@ -88,7 +88,8 @@ const SessionIn = {
 
 export const S = {
   Settings: { lock_minutes: T.int({ ge: 0, le: 1440 }), exclude_one_off: T.bool(), display_name: T.str({ max: 100 }),
-    hide_amounts: T.bool(), gcal_include_fee: T.bool(), gcal_import_keyword: T.str({ max: 200 }) },
+    hide_amounts: T.bool(), gcal_include_fee: T.bool(), gcal_import_keyword: T.str({ max: 200 }),
+    monthly_budget: T.int({ ge: 0, le: 10_000_000_000 }) },
   Account: { name: Name({ required: true }), kind: T.enum(ACC_KIND, { default: 'cash' }), opening_balance: SignedMoney({ default: 0 }),
     opening_date: T.date(), archived: T.bool() },
   AccountPatch: { name: Name(), kind: T.enum(ACC_KIND), archived: T.bool(), sort: T.int({ lo: -1e9, le: 1e9 }) },
@@ -120,9 +121,12 @@ export const S = {
     archived: T.bool(), note: Text() },
   Allocation: { amount: SignedMoney({ required: true }), date: T.date(), note: Text() },
   Obligation: { name: Name({ required: true }), amount: PosMoney({ required: true }), due_date: T.date({ required: true }),
-    recurrence: T.enum(['none', 'monthly'], { default: 'none' }), category_id: T.str({ max: 100 }), note: Text() },
-  ObligationPatch: { name: Name(), amount: PosMoney(), due_date: T.date(), recurrence: T.enum(['none', 'monthly']),
-    category_id: T.str({ max: 100 }), note: Text() },
+    recurrence: T.enum(['none', 'monthly', 'yearly'], { default: 'none' }), category_id: T.str({ max: 100 }), note: Text(),
+    kind: T.enum(['bill', 'debt', 'once'], { default: 'bill' }), provider: T.str({ max: 100 }),
+    installments: T.int({ ge: 1, le: 60 }), installment_no: T.int({ ge: 1, le: 60 }) },
+  ObligationPatch: { name: Name(), amount: PosMoney(), due_date: T.date(), recurrence: T.enum(['none', 'monthly', 'yearly']),
+    category_id: T.str({ max: 100 }), note: Text(), kind: T.enum(['bill', 'debt', 'once']), provider: T.str({ max: 100 }),
+    installments: T.int({ ge: 1, le: 60 }), installment_no: T.int({ ge: 1, le: 60 }) },
   PayObligation: { account_id: T.str({ required: true, max: 100 }), date: T.date(), amount: PosMoney() },
   DayOff: { date: T.date({ required: true }), note: T.str({ max: 300 }) },
   ImportMap: { token: T.str({ required: true, max: 100 }), mapping: T.map({ required: true }), account_id: T.str({ required: true, max: 100 }),

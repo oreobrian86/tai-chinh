@@ -17,14 +17,15 @@ export const SCHEMA = {
   transaction_lines: ['id', 'transaction_id', 'account_id', 'amount', ...META],
   goals: ['id', 'name', 'target_amount', 'target_date', 'monthly_plan', 'is_emergency', 'archived', 'note', ...META],
   goal_allocations: ['id', 'goal_id', 'date', 'amount', 'note', ...META],
-  obligations: ['id', 'name', 'amount', 'due_date', 'recurrence', 'category_id', 'paid_transaction_id', 'note', ...META],
+  obligations: ['id', 'name', 'amount', 'due_date', 'recurrence', 'category_id', 'paid_transaction_id', 'note',
+    'kind', 'provider', 'installments', 'installment_no', ...META],
   import_batches: ['id', 'filename', 'row_count', 'imported_count', 'skipped_count', 'status', ...META],
   settings: ['id', 'value', ...META],
   audit_log: ['id', 'at', 'entity', 'entity_id', 'action', 'data_json', ...META],
 };
 
 /** Cột kiểu số (tiền là số nguyên VNĐ; cờ đúng/sai lưu 0/1). */
-export const NUMERIC = new Set(['draft', 'gcal', 'archived', 'sort', 'is_system', 'total_fee', 'is_one_off', 'amount', 'target_amount',
+export const NUMERIC = new Set(['installments', 'installment_no', 'draft', 'gcal', 'archived', 'sort', 'is_system', 'total_fee', 'is_one_off', 'amount', 'target_amount',
   'monthly_plan', 'is_emergency', 'row_count', 'imported_count', 'skipped_count', 'version']);
 
 export const TABLES = Object.keys(SCHEMA);

@@ -1,4 +1,4 @@
-import { api, del, get, patch, post } from '../api.js';
+import { api, del, get, patch, post, put } from '../api.js';
 import { dailyBars } from '../charts.js';
 import { openQuickAdd, openTxEditor } from '../forms.js';
 import { accountOptions, changed, expenseCats, state } from '../state.js';
@@ -110,45 +110,91 @@ function txDetail(tx) {
   });
 }
 
-// ---------- khoản phải trả ----------
+// ---------- chi cố định, trả góp, ngân sách ----------
+const PROVIDERS = ['SPayLater', 'Shopee PayLater', 'Lazada PayLater', 'Kredivo', 'Home Credit', 'FE Credit', 'Thẻ tín dụng'];
+const oblKind = o => o.kind || (o.recurrence === 'monthly' ? 'bill' : 'once');
+const oblLabel = o => {
+  const k = oblKind(o);
+  if (k === 'debt') return o.installments > 1 ? `Trả góp kỳ ${o.installment_no}/${o.installments}` : 'Trả sau';
+  if (k === 'bill') return o.recurrence === 'yearly' ? 'Cố định hằng năm' : 'Cố định hằng tháng';
+  return 'Trả một lần';
+};
+
 async function obligationsView(root) {
-  const items = await get('/api/obligations?all=1');
+  const [items, sum, settings] = await Promise.all([get('/api/obligations?all=1'), get('/api/obligations/summary'), get('/api/settings')]);
   const unpaid = items.filter(o => !o.paid_transaction_id), paid = items.filter(o => o.paid_transaction_id).slice(0, 20);
   const t = today();
+  const budget = settings.monthly_budget || 0;
   root.innerHTML = `<div class="page">
-    <div class="page-head"><div><h1>Khoản phải trả</h1><p class="muted">Tiền nhà, điện nước, trả góp… Những khoản đến hạn trong tháng được giữ lại khỏi tiền có thể tiêu.</p></div>
-      <button class="btn primary" data-new>${icon('plus')}Thêm khoản phải trả</button></div>
+    <div class="page-head"><div><h1>Khoản phải trả</h1><p class="muted">Chi cố định (wifi, CapCut…), trả sau và trả góp (SPayLater…). Khoản đến hạn trong tháng được giữ lại khỏi tiền có thể tiêu, và được nhắc trước 3 ngày.</p></div>
+      <button class="btn primary" data-new>${icon('plus')}Thêm khoản</button></div>
     <div class="row wrap">${tabs('obl')}</div>
-    <section class="panel mt"><div class="panel-head"><h2>Chưa trả</h2><span class="money">${money(unpaid.reduce((a, o) => a + o.amount, 0))}</span></div>
+
+    <section class="panel mt"><div class="panel-head"><h2>Dự kiến chi mỗi tháng</h2></div>
+      <div class="stats">
+        <div class="stat"><div class="k">Ngân sách tiêu xài</div><div class="row"><input class="input w-auto" name="monthly_budget" inputmode="numeric" value="${budget ? new Intl.NumberFormat('vi-VN').format(budget) : ''}" placeholder="Ví dụ: 6tr" aria-label="Ngân sách tiêu xài mỗi tháng"><button class="btn sm" data-budget>Lưu</button></div>
+          <div class="n">Ăn uống, đi lại, mua sắm… (không gồm khoản cố định)</div></div>
+        <div class="stat"><div class="k">Chi cố định</div><div class="stat-v">${money(sum.fixed_monthly)}</div><div class="n">${sum.bill_count} khoản, khoản hằng năm đã chia 12</div></div>
+        <div class="stat"><div class="k">Tổng dự kiến mỗi tháng</div><div class="stat-v">${money(budget + sum.fixed_monthly)}</div><div class="n">Ngân sách + cố định${sum.debts.length ? ', chưa gồm trả góp' : ''}</div></div>
+        <div class="stat"><div class="k">Nợ trả sau / trả góp còn lại</div><div class="stat-v">${money(sum.debt_remaining)}</div><div class="n">${sum.debts.length ? `${sum.debts.length} nơi` : 'Không có'}</div></div>
+      </div>
+    </section>
+
+    ${sum.debts.length ? `<section class="panel"><div class="panel-head"><h2>Trả sau / trả góp</h2></div><div class="list">${sum.debts.map(d => `<div class="item">
+      <span class="ic">💳</span><span><div class="t">${h(d.provider)}</div><div class="s">Còn ${d.periods_left} kỳ. Kỳ tới ${h(dmy(d.next_due))}: ${short(d.next_amount)}${d.next_due < t ? ', <b>đã quá hạn</b>' : ''}</div></span>
+      <span class="v">${money(d.remaining)}</span></div>`).join('')}</div></section>` : ''}
+
+    <section class="panel"><div class="panel-head"><h2>Chưa trả</h2><span class="money">${money(unpaid.reduce((a, o) => a + o.amount, 0))}</span></div>
       <div class="list">${unpaid.length ? unpaid.map(o => `<div class="item" data-o="${h(o.id)}">
-        <span class="ic">${h(o.category_icon || '📌')}</span>
-        <span><div class="t">${h(o.name)}</div><div class="s">Hạn ${h(dmy(o.due_date))}${o.recurrence === 'monthly' ? ', lặp lại hằng tháng' : ''}${o.due_date < t ? ', đã quá hạn' : ''}</div></span>
-        <span class="v">${money(o.amount)}<small><button class="btn sm sage" data-pay="${h(o.id)}">Đã trả</button></small></span></div>`).join('') : empty('📌', 'Chưa có khoản phải trả nào.')}</div></section>
+        <span class="ic">${oblKind(o) === 'debt' ? '💳' : h(o.category_icon || '📌')}</span>
+        <span><div class="t">${h(o.name)}</div><div class="s">${h(oblLabel(o))}, hạn ${h(dmy(o.due_date))}${o.due_date < t ? ', <b>đã quá hạn</b>' : ''}</div></span>
+        <span class="v">${money(o.amount)}<small><button class="btn sm sage" data-pay="${h(o.id)}">Đã trả</button></small></span></div>`).join('') : empty('📌', 'Chưa có khoản nào. Thêm tiền wifi, gói CapCut, kỳ SPayLater… để được nhắc khi đến hạn.')}</div></section>
     ${paid.length ? `<section class="panel"><div class="panel-head"><h2>Đã trả gần đây</h2></div><div class="list">${paid.map(o => `<div class="item">
-      <span class="ic">✓</span><span><div class="t">${h(o.name)}</div><div class="s">Hạn ${h(dmy(o.due_date))}</div></span><span class="v faint">${money(o.amount)}</span></div>`).join('')}</div></section>` : ''}
+      <span class="ic">✓</span><span><div class="t">${h(o.name)}</div><div class="s">${h(oblLabel(o))}, hạn ${h(dmy(o.due_date))}</div></span><span class="v faint">${money(o.amount)}</span></div>`).join('')}</div></section>` : ''}
   </div>`;
+  formatMoneyInput($('[name=monthly_budget]', root));
+  on(root, 'click', '[data-budget]', (e, b) => busy(b, async () => {
+    try {
+      const v = parseMoney($('[name=monthly_budget]', root).value || '0');
+      if (!(v >= 0)) return toast('Nhập số tiền hợp lệ', 'err');
+      await put('/api/settings', { monthly_budget: v }); toast('Đã lưu ngân sách'); await changed();
+    } catch (err) { toastErr(err); }
+  }));
   on(root, 'click', '[data-new]', () => obligationForm());
   on(root, 'click', '[data-o]', (e, el) => { if (!e.target.closest('button')) obligationForm(unpaid.find(o => o.id === el.dataset.o)); });
   on(root, 'click', '[data-pay]', (e, b) => payObligation(unpaid.find(o => o.id === b.dataset.pay)));
 }
 
 function obligationForm(o = null) {
-  sheet(o ? 'Sửa khoản phải trả' : 'Khoản phải trả mới', `<form class="form" novalidate>
-    ${field('Tên khoản', `<input class="input" name="name" value="${h(o?.name || '')}" placeholder="Ví dụ: Tiền nhà" maxlength="200">`)}
-    <div class="two">${field('Số tiền', `<input class="input" name="amount" inputmode="numeric" value="${o ? new Intl.NumberFormat('vi-VN').format(o.amount) : ''}">`)}
-      ${field('Hạn trả', `<input class="input" type="date" name="due_date" value="${h(o?.due_date || today())}">`)}</div>
-    <div class="two">${field('Lặp lại', `<select class="input" name="recurrence">${options([['none', 'Một lần'], ['monthly', 'Hằng tháng']], o?.recurrence)}</select>`)}
-      ${field('Danh mục khi trả', `<select class="input" name="category_id">${options([['', 'Khác'], ...expenseCats().map(c => [c.id, c.name])], o?.category_id)}</select>`)}</div>
+  const k = o ? oblKind(o) : 'bill';
+  sheet(o ? 'Sửa khoản phải trả' : 'Thêm khoản phải trả', `<form class="form" novalidate>
+    ${field('Loại', `<select class="input" name="kind">${options([['bill', 'Chi cố định (wifi, CapCut, tiền nhà…)'], ['debt', 'Trả sau / trả góp (SPayLater…)'], ['once', 'Trả một lần']], k)}</select>`)}
+    <div data-for="debt">${field('Trả cho', `<input class="input" name="provider" list="provider-list" value="${h(o?.provider || '')}" placeholder="Ví dụ: SPayLater" maxlength="100">
+      <datalist id="provider-list">${PROVIDERS.map(p => `<option value="${h(p)}">`).join('')}</datalist>`)}</div>
+    ${field('Tên khoản', `<input class="input" name="name" value="${h(o?.name || '')}" placeholder="Ví dụ: Wifi Viettel" maxlength="200">`)}
+    <div class="two">${field('Số tiền mỗi kỳ', `<input class="input" name="amount" inputmode="numeric" value="${o ? new Intl.NumberFormat('vi-VN').format(o.amount) : ''}">`)}
+      ${field('Hạn trả (kỳ gần nhất)', `<input class="input" type="date" name="due_date" value="${h(o?.due_date || today())}">`)}</div>
+    <div class="two" data-for="debt">${field('Tổng số kỳ', `<input class="input" name="installments" type="number" min="1" max="60" value="${h(o?.installments || 1)}">`, '1 kỳ = trả sau một lần')}
+      ${field('Đang ở kỳ thứ', `<input class="input" name="installment_no" type="number" min="1" max="60" value="${h(o?.installment_no || 1)}">`)}</div>
+    <div data-for="bill">${field('Lặp lại', `<select class="input" name="recurrence">${options([['monthly', 'Hằng tháng'], ['yearly', 'Hằng năm']], o?.recurrence === 'yearly' ? 'yearly' : 'monthly')}</select>`)}</div>
+    ${field('Danh mục khi trả', `<select class="input" name="category_id">${options([['', 'Khác'], ...expenseCats().map(c => [c.id, c.name])], o?.category_id)}</select>`)}
     ${field('Ghi chú', `<input class="input" name="note" value="${h(o?.note || '')}" maxlength="300">`)}
     <div class="row">${o ? `<button type="button" class="btn ghost danger" data-del>${icon('trash')}Xóa</button>` : ''}<span class="spacer"></span>
       <button class="btn primary" type="submit">Lưu</button></div></form>`, {
     onMount(root, close) {
       const form = $('form', root);
       formatMoneyInput(form.amount);
+      const sync = () => root.querySelectorAll('[data-for]').forEach(el => el.classList.toggle('hidden', el.dataset.for !== form.kind.value));
+      sync();
+      form.kind.addEventListener('change', sync);
+      form.provider.addEventListener('change', () => { if (!form.name.value) form.name.value = form.provider.value; });
       form.addEventListener('submit', async e => {
         e.preventDefault();
         const d = formData(form);
-        const body = { name: d.name, amount: parseMoney(d.amount), due_date: d.due_date, recurrence: d.recurrence, category_id: d.category_id || null, note: d.note || null };
+        if (d.kind === 'debt' && !d.name) d.name = d.provider;
+        const body = { kind: d.kind, name: d.name, amount: parseMoney(d.amount), due_date: d.due_date, category_id: d.category_id || null, note: d.note || null };
+        if (d.kind === 'debt') Object.assign(body, { provider: d.provider || null, installments: Number(d.installments) || 1, installment_no: Number(d.installment_no) || 1 });
+        else body.recurrence = d.kind === 'bill' ? d.recurrence : 'none';
         await busy(form.querySelector('[type=submit]'), async () => {
           try { o ? await patch('/api/obligations/' + o.id, body) : await post('/api/obligations', body); toast('Đã lưu'); close(); await changed(); }
           catch (err) { showErrors(form, err); }
@@ -168,7 +214,7 @@ function payObligation(o) {
     <div class="two">${field('Trả từ tài khoản', `<select class="input" name="account_id">${options(accountOptions())}</select>`)}
       ${field('Ngày trả', `<input class="input" type="date" name="date" value="${today()}">`)}</div>
     ${field('Số tiền thực trả', `<input class="input" name="amount" inputmode="numeric" value="${new Intl.NumberFormat('vi-VN').format(o.amount)}">`)}
-    <p class="small muted">Một khoản chi sẽ được tạo.${o.recurrence === 'monthly' ? ' Kỳ tháng sau được tự động thêm.' : ''}</p>
+    <p class="small muted">Một khoản chi sẽ được tạo.${oblKind(o) === 'debt' ? ((o.installment_no || 1) < (o.installments || 1) ? ` Kỳ ${(o.installment_no || 1) + 1}/${o.installments} được tự động thêm vào tháng sau.` : ' Đây là kỳ cuối.') : o.recurrence === 'monthly' ? ' Kỳ tháng sau được tự động thêm.' : o.recurrence === 'yearly' ? ' Kỳ năm sau được tự động thêm.' : ''}</p>
     <div class="sheet-foot"><button class="btn primary block" type="submit">Ghi nhận đã trả</button></div></form>`, {
     onMount(root, close) {
       const form = $('form', root);

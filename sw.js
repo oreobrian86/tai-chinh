@@ -1,7 +1,7 @@
 // Service worker: mở app tức thì từ bản đã lưu trên máy, đồng thời lấy bản mới ở nền.
 // KHÔNG BAO GIỜ lưu dữ liệu tài chính: chỉ các file giao diện; mọi yêu cầu tới Google đi thẳng, không qua đây.
 // Mỗi bản phát hành đổi VERSION → máy tự tải trọn bộ file mới và app hiện thông báo "Đã có bản mới".
-const VERSION = '2026-11-12-5';
+const VERSION = '2026-11-12-6';
 const CACHE = 'shell-' + VERSION;
 const SHELL = [
   './',
@@ -26,6 +26,7 @@ const SHELL = [
   'js/core/db.js',
   'js/core/finance.js',
   'js/core/gcal.js',
+  'js/core/nlp.js',
   'js/core/importer.js',
   'js/core/reports.js',
   'js/core/router.js',
