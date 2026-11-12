@@ -1,0 +1,398 @@
+// Các form nhập liệu dùng chung: chi/thu, chuyển khoản, show, ghi nhận tiền về, hủy show, thêm nhanh.
+import { get, patch, post } from './api.js';
+import { accountOptions, activeAccounts, changed, expenseCats, incomeCats, state } from './state.js';
+import { busy, field, formData, options, sheet, showErrors, toast, toastErr } from './ui.js';
+import {
+  $, $$, dmy, formatMoneyInput, h, money, on, parseMoney, SESSION_KINDS, short, today, WORK_ICONS, WORK_TYPES,
+} from './util.js';
+
+const amountBlock = (value = '', label = 'Số tiền') => `
+  <div class="amount-wrap">
+    <label class="sr" for="amt">${h(label)}</label>
+    <input id="amt" class="amount-input" name="amount" inputmode="numeric" autocomplete="off" placeholder="0"
+      value="${value ? new Intl.NumberFormat('vi-VN').format(value) : ''}" autofocus>
+    <div class="unit">đồng</div>
+    <div class="quick-amt">
+      <button type="button" class="btn sm" data-amt="000">+000</button>
+      <button type="button" class="btn sm" data-amt="20000">20k</button>
+      <button type="button" class="btn sm" data-amt="50000">50k</button>
+      <button type="button" class="btn sm" data-amt="100000">100k</button>
+      <button type="button" class="btn sm ghost" data-amt="clear">Xóa</button>
+    </div>
+  </div>`;
+
+function bindAmount(root) {
+  const inp = $('[name=amount]', root);
+  formatMoneyInput(inp);
+  on(root, 'click', '[data-amt]', (e, b) => {
+    const cur = parseMoney(inp.value) || 0;
+    const a = b.dataset.amt;
+    const v = a === 'clear' ? 0 : a === '000' ? cur * 1000 : Number(a);
+    inp.value = v ? new Intl.NumberFormat('vi-VN').format(v) : '';
+    inp.focus();
+  });
+  return () => parseMoney(inp.value);
+}
+
+const accountSelect = (name = 'account_id', selected) =>
+  `<select class="input" name="${name}">${options(accountOptions(), selected || activeAccounts()[0]?.id)}</select>`;
+
+// ---------- chi tiêu / thu khác ----------
+export function renderMoneyForm(root, { kind = 'expense', tx = null, close, onDone } = {}) {
+  const cats = kind === 'expense' ? expenseCats() : incomeCats();
+  const selCat = tx?.category_id || '';
+  root.innerHTML = `<form class="form" novalidate>
+    ${amountBlock(tx ? Math.abs(tx.amount) : '')}
+    <div class="cat-grid" role="group" aria-label="Danh mục">
+      ${cats.map(c => `<button type="button" class="cat-btn" data-cat="${h(c.id)}" aria-pressed="${c.id === selCat}">
+        <span class="ic">${h(c.icon || '•')}</span>${h(c.name)}</button>`).join('')}
+    </div>
+    <input type="hidden" name="category_id" value="${h(selCat)}">
+    <div class="two">
+      ${field('Tài khoản', accountSelect('account_id', tx?.lines?.[0]?.account_id))}
+      ${field('Ngày', `<input class="input" type="date" name="date" value="${h(tx?.date || today())}" max="2100-12-31">`)}
+    </div>
+    ${field(kind === 'expense' ? 'Nội dung' : 'Nguồn tiền', `<input class="input" name="description" maxlength="300" value="${h(tx?.description || '')}" placeholder="${kind === 'expense' ? 'Ví dụ: cơm trưa' : 'Ví dụ: bán lại ống kính cũ'}">`)}
+    <details class="more"${tx?.note || tx?.is_one_off ? ' open' : ''}><summary>Thêm ghi chú</summary>
+      <div class="form">
+        ${field('Ghi chú', `<textarea class="input" name="note" maxlength="2000">${h(tx?.note || '')}</textarea>`)}
+        ${kind === 'expense' ? `<label class="check"><input type="checkbox" name="is_one_off"${tx?.is_one_off ? ' checked' : ''}> Khoản chi lớn bất thường (có thể loại khỏi mức chi trung bình)</label>` : ''}
+      </div>
+    </details>
+    <div class="sheet-foot"><button class="btn primary block" type="submit">${tx ? 'Lưu thay đổi' : kind === 'expense' ? 'Lưu khoản chi' : 'Lưu khoản thu'}</button></div>
+  </form>`;
+  const form = $('form', root);
+  const amount = bindAmount(root);
+  on(root, 'click', '[data-cat]', (e, b) => {
+    $$('[data-cat]', root).forEach(x => x.setAttribute('aria-pressed', 'false'));
+    b.setAttribute('aria-pressed', 'true');
+    form.category_id.value = b.dataset.cat;
+  });
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const d = formData(form);
+    const amt = amount();
+    if (!amt || amt <= 0) return showErrors(form, { fields: { amount: 'Nhập số tiền lớn hơn 0' } });
+    const body = { amount: amt, account_id: d.account_id, date: d.date, description: d.description || null,
+      category_id: d.category_id || null, note: d.note || null };
+    if (kind === 'expense') body.is_one_off = !!d.is_one_off;
+    await busy(form.querySelector('[type=submit]'), async () => {
+      try {
+        if (tx) await patch(`/api/transactions/${tx.id}`, body);
+        else await post('/api/transactions', { kind, ...body });
+        toast(tx ? 'Đã lưu thay đổi' : `Đã lưu ${kind === 'expense' ? 'khoản chi' : 'khoản thu'} ${money(amt)}`);
+        close?.(); await changed(); onDone?.();
+      } catch (err) { showErrors(form, err); }
+    });
+  });
+}
+
+// ---------- chuyển khoản ----------
+export function renderTransferForm(root, { tx = null, close } = {}) {
+  const accs = activeAccounts();
+  if (accs.length < 2) {
+    root.innerHTML = `<p class="muted">Cần ít nhất 2 tài khoản để chuyển tiền. Thêm tài khoản trong Cài đặt.</p>
+      <div class="sheet-foot"><a class="btn block" href="#/settings">Mở Cài đặt</a></div>`;
+    return;
+  }
+  const src = tx?.lines?.find(l => l.amount < 0)?.account_id || accs.find(a => a.kind === 'bank')?.id || accs[0].id;
+  const dst = tx?.lines?.find(l => l.amount > 0)?.account_id || accs.find(a => a.id !== src)?.id;
+  root.innerHTML = `<form class="form" novalidate>
+    ${amountBlock(tx?.amount || '')}
+    <div class="two">
+      ${field('Từ tài khoản', accountSelect('account_id', src))}
+      ${field('Sang tài khoản', accountSelect('to_account_id', dst))}
+    </div>
+    <div class="two">
+      ${field('Ngày', `<input class="input" type="date" name="date" value="${h(tx?.date || today())}">`)}
+      ${tx ? '' : field('Phí chuyển (nếu có)', `<input class="input" name="fee" inputmode="numeric" placeholder="0">`, 'Phí được ghi thành 1 khoản chi riêng')}
+    </div>
+    ${field('Ghi chú', `<input class="input" name="note" maxlength="300" value="${h(tx?.note || '')}" placeholder="Ví dụ: rút tiền mặt">`)}
+    <p class="small muted">Chuyển tiền giữa các tài khoản không tính là thu hay chi, tổng tài sản giữ nguyên.</p>
+    <div class="sheet-foot"><button class="btn primary block" type="submit">${tx ? 'Lưu thay đổi' : 'Chuyển tiền'}</button></div>
+  </form>`;
+  const form = $('form', root);
+  const amount = bindAmount(root);
+  if (form.fee) formatMoneyInput(form.fee);
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const d = formData(form);
+    const amt = amount();
+    if (!amt || amt <= 0) return showErrors(form, { fields: { amount: 'Nhập số tiền lớn hơn 0' } });
+    if (d.account_id === d.to_account_id) return showErrors(form, { fields: { to_account_id: 'Chọn tài khoản khác tài khoản nguồn' } });
+    await busy(form.querySelector('[type=submit]'), async () => {
+      try {
+        const body = { amount: amt, account_id: d.account_id, to_account_id: d.to_account_id, date: d.date, note: d.note || null };
+        if (tx) await patch(`/api/transactions/${tx.id}`, body);
+        else await post('/api/transactions', { kind: 'transfer', fee: parseMoney(d.fee) || 0, ...body });
+        toast(tx ? 'Đã lưu thay đổi' : 'Đã chuyển tiền');
+        close?.(); await changed();
+      } catch (err) { showErrors(form, err); }
+    });
+  });
+}
+
+// ---------- ghi nhận tiền về từ show ----------
+export async function renderPaymentForm(root, { job = null, close, onDone } = {}) {
+  let jobs = [];
+  if (!job) {
+    root.innerHTML = '<div class="loading">Đang tải danh sách show…</div>';
+    jobs = (await get('/api/jobs?pay=unpaid&status=booked,in_progress,done')).items;
+    if (!jobs.length) {
+      root.innerHTML = `<div class="empty"><div class="big">🎉</div><p>Không có show nào đang chờ thanh toán.</p></div>
+        <div class="sheet-foot"><button class="btn block" data-newjob>Tạo show mới</button></div>`;
+      $('[data-newjob]', root).onclick = () => { close?.(); openJobForm(); };
+      return;
+    }
+  }
+  const pick = job || jobs[0];
+  root.innerHTML = `<form class="form" novalidate>
+    ${job ? `<div><div class="t"><b>${h(job.title)}</b></div><div class="small muted">${h(job.client_name || 'Chưa có tên khách')}: còn nợ ${money(job.outstanding)}</div></div>` :
+      field('Show', `<select class="input" name="job_id">${jobs.map(j => `<option value="${h(j.id)}" data-out="${j.outstanding}">${h(j.title)} (${h(j.client_name || '')}): còn ${h(short(j.outstanding))}</option>`).join('')}</select>`)}
+    ${amountBlock(pick.outstanding, 'Số tiền nhận')}
+    <div class="two">
+      ${field('Vào tài khoản', accountSelect())}
+      ${field('Ngày nhận', `<input class="input" type="date" name="date" value="${today()}">`)}
+    </div>
+    ${field('Ghi chú', `<input class="input" name="note" maxlength="300" placeholder="Ví dụ: khách chuyển khoản đợt 2">`)}
+    <p class="small muted">Chỉ cần nhập số tiền nhận được. Công nợ của show tự giảm, tiền được cộng vào tài khoản. Đây không phải thu nhập mới.</p>
+    <div class="sheet-foot"><button class="btn primary block" type="submit">Ghi nhận tiền về</button></div>
+  </form>`;
+  const form = $('form', root);
+  const amount = bindAmount(root);
+  form.job_id?.addEventListener('change', () => {
+    const o = form.job_id.selectedOptions[0].dataset.out;
+    form.amount.value = new Intl.NumberFormat('vi-VN').format(Number(o));
+  });
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const d = formData(form);
+    const amt = amount();
+    if (!amt || amt <= 0) return showErrors(form, { fields: { amount: 'Nhập số tiền lớn hơn 0' } });
+    const jid = job?.id || d.job_id;
+    await busy(form.querySelector('[type=submit]'), async () => {
+      try {
+        const j = await post(`/api/jobs/${jid}/payments`, { amount: amt, account_id: d.account_id, date: d.date, note: d.note || null });
+        toast(j.outstanding > 0 ? `Đã nhận ${money(amt)}. Còn nợ ${money(j.outstanding)}` : `Đã nhận ${money(amt)}. Show đã thanh toán đủ`);
+        close?.(); await changed(); onDone?.(j);
+      } catch (err) { showErrors(form, err); }
+    });
+  });
+}
+
+export const openPaymentForm = (job, onDone) =>
+  sheet('Ghi nhận tiền về', '', { onMount: (b, c) => renderPaymentForm(b, { job, close: c, onDone }) });
+
+// ---------- show ----------
+const sessionRow = (s = {}) => `
+  <div class="session-row" data-sid="${h(s.id || '')}">
+    <div class="two">
+      <select class="input" data-f="kind" aria-label="Công đoạn">${options(Object.entries(SESSION_KINDS), s.kind || 'shoot')}</select>
+      <input class="input" type="date" data-f="date" value="${h(s.date || today())}" aria-label="Ngày">
+    </div>
+    <div class="two">
+      <input class="input" type="time" data-f="start_time" value="${h(s.start_time || '')}" aria-label="Giờ bắt đầu">
+      <input class="input" type="time" data-f="end_time" value="${h(s.end_time || '')}" aria-label="Giờ kết thúc">
+    </div>
+    <div class="row"><input class="input" data-f="location" value="${h(s.location || '')}" placeholder="Địa điểm" aria-label="Địa điểm">
+      <button type="button" class="btn ghost icon-btn" data-rm aria-label="Bỏ ngày này">✕</button></div>
+  </div>`;
+
+export function openJobForm(job = null, { date, onDone } = {}) {
+  const multi = job && job.sessions && job.sessions.length > 1;
+  const first = job?.sessions?.[0] || {};
+  const body = `<form class="form" novalidate>
+    ${field('Tên show / dự án', `<input class="input" name="title" maxlength="200" value="${h(job?.title || '')}" placeholder="Ví dụ: Quay cưới Hoàng & Mai" autofocus>`)}
+    <div class="two">
+      ${field('Khách hàng / chủ show', `<input class="input" name="client_name" list="client-list" maxlength="200" value="${h(job?.client_name || '')}" placeholder="Tên người thuê">
+        <datalist id="client-list">${state.clients.map(c => `<option value="${h(c.name)}">`).join('')}</datalist>`)}
+      ${field('Loại công việc', `<select class="input" name="work_type">${options(Object.entries(WORK_TYPES), job?.work_type || 'video')}</select>`)}
+    </div>
+    ${field('Tổng tiền công', `<input class="input" name="total_fee" inputmode="numeric" value="${job ? new Intl.NumberFormat('vi-VN').format(job.total_fee) : ''}" placeholder="Ví dụ: 1.500.000 hoặc 1tr5">`)}
+    ${job ? '' : `<div class="two">
+      ${field('Tiền cọc đã nhận', `<input class="input" name="deposit" inputmode="numeric" placeholder="0">`)}
+      ${field('Cọc vào tài khoản', accountSelect('deposit_account_id'))}
+    </div>`}
+    <div class="two">
+      ${field('Ngày thực hiện', `<input class="input" type="date" name="work_date" value="${h(job?.work_date || date || today())}">`)}
+      ${field('Hạn thanh toán', `<input class="input" type="date" name="due_date" value="${h(job?.due_date || '')}">`)}
+    </div>
+    <div class="single-session${multi ? ' hidden' : ''}">
+      <div class="two">
+        ${field('Giờ bắt đầu', `<input class="input" type="time" name="start_time" value="${h(first.start_time || '')}">`)}
+        ${field('Giờ kết thúc', `<input class="input" type="time" name="end_time" value="${h(first.end_time || '')}">`)}
+      </div>
+      ${field('Địa điểm', `<input class="input" name="location" maxlength="300" value="${h(job?.location || first.location || '')}">`)}
+    </div>
+    <label class="check"><input type="checkbox" name="multi"${multi ? ' checked' : ''}> Nhiều ngày làm / nhiều công đoạn (quay, dựng, bàn giao…)</label>
+    <div class="sessions${multi ? '' : ' hidden'}">
+      <div class="session-list stack">${(job?.sessions?.length ? job.sessions : [{ date: date || today() }]).map(sessionRow).join('')}</div>
+      <button type="button" class="btn sm" data-addsess>Thêm ngày làm</button>
+    </div>
+    ${job ? field('Trạng thái', `<select class="input" name="work_status"${job.work_status === 'cancelled' ? ' disabled' : ''}>${options([['booked', 'Đã nhận show'], ['in_progress', 'Đang thực hiện'], ['done', 'Hoàn thành']], job.work_status)}</select>`) :
+      field('Trạng thái', `<select class="input" name="work_status">${options([['booked', 'Đã nhận show (chưa làm)'], ['in_progress', 'Đang thực hiện'], ['done', 'Đã làm xong']], 'booked')}</select>`)}
+    <details class="more"${job?.description || job?.note ? ' open' : ''}><summary>Nội dung và ghi chú</summary>
+      <div class="form">
+        ${field('Nội dung công việc', `<textarea class="input" name="description" maxlength="2000">${h(job?.description || '')}</textarea>`)}
+        ${field('Ghi chú', `<textarea class="input" name="note" maxlength="2000">${h(job?.note || '')}</textarea>`)}
+      </div>
+    </details>
+    <div class="sheet-foot"><button class="btn primary block" type="submit">${job ? 'Lưu show' : 'Tạo show'}</button></div>
+  </form>`;
+  sheet(job ? 'Sửa show' : 'Show mới', body, {
+    onMount(root, close) {
+      const form = $('form', root);
+      ['total_fee', 'deposit'].forEach(n => form[n] && formatMoneyInput(form[n]));
+      form.multi.addEventListener('change', () => {
+        $('.sessions', root).classList.toggle('hidden', !form.multi.checked);
+        $('.single-session', root).classList.toggle('hidden', form.multi.checked);
+        if (form.multi.checked) {
+          const r = $('.session-row', root);
+          if (r) {
+            $('[data-f=date]', r).value = form.work_date.value;
+            $('[data-f=start_time]', r).value = form.start_time.value;
+            $('[data-f=end_time]', r).value = form.end_time.value;
+            $('[data-f=location]', r).value = form.location.value;
+            const kindMap = { video: 'shoot', photo: 'photo', edit: 'edit', other: 'other' };
+            $('[data-f=kind]', r).value = kindMap[form.work_type.value];
+          }
+        }
+      });
+      on(root, 'click', '[data-addsess]', () => {
+        const last = $$('.session-row', root).pop();
+        const d = last ? $('[data-f=date]', last).value : form.work_date.value;
+        const next = d ? new Date(new Date(d).getTime() + 864e5).toISOString().slice(0, 10) : today();
+        $('.session-list', root).insertAdjacentHTML('beforeend', sessionRow({ date: next, kind: 'edit' }));
+      });
+      on(root, 'click', '[data-rm]', (e, b) => {
+        if ($$('.session-row', root).length > 1) b.closest('.session-row').remove();
+      });
+      form.addEventListener('submit', async e => {
+        e.preventDefault();
+        const d = formData(form);
+        const fee = parseMoney(d.total_fee);
+        if (!d.title) return showErrors(form, { fields: { title: 'Nhập tên show' } });
+        if (!(fee >= 0)) return showErrors(form, { fields: { total_fee: 'Nhập tổng tiền công' } });
+        const body = { title: d.title, client_name: d.client_name || null, work_type: d.work_type, work_date: d.work_date,
+          total_fee: fee, due_date: d.due_date || null, description: d.description || null, note: d.note || null };
+        if (d.work_status) body.work_status = d.work_status;
+        let sessions;
+        if (form.multi.checked) {
+          sessions = $$('.session-row', root).map(r => {
+            const s = { kind: $('[data-f=kind]', r).value, date: $('[data-f=date]', r).value,
+              start_time: $('[data-f=start_time]', r).value || null, end_time: $('[data-f=end_time]', r).value || null,
+              location: $('[data-f=location]', r).value || null };
+            if (r.dataset.sid) s.id = r.dataset.sid;
+            return s;
+          });
+          body.location = sessions[0]?.location || null;
+        } else {
+          body.location = d.location || null;
+          const kindMap = { video: 'shoot', photo: 'photo', edit: 'edit', other: 'other' };
+          if (job) sessions = [{ id: first.id, kind: first.kind || kindMap[d.work_type], date: d.work_date,
+            start_time: d.start_time || null, end_time: d.end_time || null, location: d.location || null }];
+          else { body.start_time = d.start_time || null; body.end_time = d.end_time || null; }
+        }
+        if (sessions) body.sessions = sessions;
+        if (!job) {
+          const dep = parseMoney(d.deposit) || 0;
+          if (dep > fee) return showErrors(form, { fields: { deposit: 'Tiền cọc lớn hơn tổng tiền công' } });
+          if (dep > 0) { body.deposit = dep; body.deposit_account_id = d.deposit_account_id; }
+        }
+        await busy(form.querySelector('[type=submit]'), async () => {
+          try {
+            const saved = job ? await patch(`/api/jobs/${job.id}`, body) : await post('/api/jobs', body);
+            if (saved.conflicts?.length) {
+              const c = saved.conflicts[0];
+              toast(`Lưu ý: trùng giờ với "${c.a_job === saved.id ? c.b_title : c.a_title}" ngày ${dmy(c.date)}`, 'err');
+            } else toast(job ? 'Đã lưu show' : 'Đã tạo show');
+            close(); await changed(); onDone?.(saved);
+          } catch (err) { showErrors(form, err); }
+        });
+      });
+    },
+  });
+}
+
+export function openCancelForm(job, onDone) {
+  sheet('Hủy show', `<form class="form" novalidate>
+    <p>Show <b>${h(job.title)}</b> đã nhận ${money(job.received)}. Chọn cách xử lý tiền đã nhận:</p>
+    <label class="check"><input type="radio" name="policy" value="keep" checked> Giữ lại tiền cọc (tính là doanh thu của show đã hủy)</label>
+    <label class="check"><input type="radio" name="policy" value="refund"${job.received > 0 ? '' : ' disabled'}> Hoàn lại tiền cọc cho khách</label>
+    <div class="refund-acc hidden">${field('Hoàn từ tài khoản', accountSelect())}</div>
+    <p class="small muted">Sau khi hủy, công nợ của show về 0 và show không còn nằm trong doanh thu dự kiến.</p>
+    <div class="sheet-foot"><button class="btn danger block" type="submit">Hủy show</button></div>
+  </form>`, {
+    onMount(root, close) {
+      const form = $('form', root);
+      form.addEventListener('change', () => $('.refund-acc', root).classList.toggle('hidden', formData(form).policy !== 'refund'));
+      form.addEventListener('submit', async e => {
+        e.preventDefault();
+        const d = formData(form);
+        await busy(form.querySelector('[type=submit]'), async () => {
+          try {
+            const j = await post(`/api/jobs/${job.id}/cancel`, { policy: d.policy, account_id: d.policy === 'refund' ? d.account_id : null });
+            toast('Đã hủy show'); close(); await changed(); onDone?.(j);
+          } catch (err) { showErrors(form, err); }
+        });
+      });
+    },
+  });
+}
+
+// ---------- sửa giao dịch bất kỳ ----------
+export function openTxEditor(tx, onDone) {
+  if (tx.kind === 'expense' || tx.kind === 'other_income') {
+    return sheet(tx.kind === 'expense' ? 'Sửa khoản chi' : 'Sửa khoản thu', '', { onMount: (b, c) => renderMoneyForm(b, { kind: tx.kind, tx, close: c, onDone }) });
+  }
+  if (tx.kind === 'transfer') return sheet('Sửa chuyển khoản', '', { onMount: (b, c) => renderTransferForm(b, { tx, close: c }) });
+  // tiền show, hoàn cọc, điều chỉnh: sửa ngày / số tiền / ghi chú
+  const locked = tx.kind === 'job_refund';
+  sheet('Sửa giao dịch', `<form class="form" novalidate>
+    <p class="muted">${h(tx.description || '')}</p>
+    ${locked ? `<p>Số tiền: <b>${money(tx.amount)}</b> (khoản hoàn cọc chỉ sửa được ngày và ghi chú)</p>` : amountBlock(Math.abs(tx.amount))}
+    ${field('Ngày', `<input class="input" type="date" name="date" value="${h(tx.date)}">`)}
+    ${field('Ghi chú', `<input class="input" name="note" maxlength="300" value="${h(tx.note || '')}">`)}
+    <div class="sheet-foot"><button class="btn primary block" type="submit">Lưu thay đổi</button></div></form>`, {
+    onMount(root, close) {
+      const form = $('form', root);
+      const amount = locked ? null : bindAmount(root);
+      form.addEventListener('submit', async e => {
+        e.preventDefault();
+        const d = formData(form);
+        const body = { date: d.date, note: d.note || null };
+        if (amount) body.amount = tx.kind === 'adjustment' && tx.amount < 0 ? -amount() : amount();
+        await busy(form.querySelector('[type=submit]'), async () => {
+          try { await patch(`/api/transactions/${tx.id}`, body); toast('Đã lưu thay đổi'); close(); await changed(); onDone?.(); }
+          catch (err) { showErrors(form, err); }
+        });
+      });
+    },
+  });
+}
+
+// ---------- thêm nhanh ----------
+export function openQuickAdd(initial = 'expense') {
+  sheet('Thêm nhanh', `<div class="seg qa-seg" role="group" aria-label="Loại">
+      <button data-k="expense">Chi</button><button data-k="payment">Khách trả</button>
+      <button data-k="other_income">Thu khác</button><button data-k="transfer">Chuyển</button><button data-k="job">Show mới</button>
+    </div><div class="qa-body"></div>`, {
+    onMount(root, close) {
+      const bodyEl = $('.qa-body', root);
+      const show = k => {
+        $$('.qa-seg button', root).forEach(b => b.setAttribute('aria-pressed', String(b.dataset.k === k)));
+        bodyEl.innerHTML = '';
+        if (k === 'expense' || k === 'other_income') renderMoneyForm(bodyEl, { kind: k, close });
+        else if (k === 'transfer') renderTransferForm(bodyEl, { close });
+        else if (k === 'payment') renderPaymentForm(bodyEl, { close }).catch(toastErr);
+        else if (k === 'job') { close(); openJobForm(); }
+        const a = $('[name=amount]', bodyEl);
+        if (a && window.matchMedia('(min-width: 861px)').matches) a.focus();
+      };
+      on(root, 'click', '.qa-seg button', (e, b) => show(b.dataset.k));
+      show(initial);
+    },
+  });
+}
+
+export { WORK_ICONS };

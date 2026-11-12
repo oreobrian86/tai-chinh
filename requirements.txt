@@ -1,0 +1,7 @@
+# Thư viện chạy ứng dụng (đúng các phiên bản đã kiểm thử)
+starlette==1.7.0
+uvicorn==0.54.0
+pydantic==2.13.5
+cryptography==50.0.1
+openpyxl==3.1.5
+python-multipart==0.0.32

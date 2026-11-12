@@ -1,0 +1,6 @@
+# Chỉ cần khi chạy bộ kiểm thử
+-r requirements.txt
+pytest==9.1.1
+requests==2.34.2
+# Tùy chọn, cho test giao diện bằng trình duyệt:
+# playwright==1.63.0   (sau đó chạy: python -m playwright install chromium)
