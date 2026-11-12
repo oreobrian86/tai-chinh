@@ -2,7 +2,8 @@ import { get } from '../api.js';
 import { C, groupedBars, lineChart } from '../charts.js';
 import { openPaymentForm } from '../forms.js';
 import { empty } from '../ui.js';
-import { addDays, daysBetween, dm, h, money, monthShort, niceDate, SESSION_KINDS, short, WORK_TYPES } from '../util.js';
+import { addDays, daysBetween, dm, h, money, monthShort, niceDate, privacy, SESSION_KINDS, short, WORK_TYPES } from '../util.js';
+import { icon } from '../ui.js';
 
 const WINDOW = 60; // số ngày hiển thị trên thanh đường chạy tiền
 
@@ -53,13 +54,15 @@ export async function dashboardView(root) {
 
   root.innerHTML = `<div class="page">
     <section class="hero">
-      <div class="row wrap"><span class="hero-label">Có thể tiêu</span><span class="spacer"></span><span class="faint small">${h(hello)}</span></div>
+      <div class="row wrap"><span class="hero-label">Có thể tiêu</span>
+        <button class="btn ghost icon-btn eye-btn" data-eye aria-label="Ẩn hoặc hiện số tiền"></button>
+        <span class="spacer"></span><span class="faint small">${h(hello)}</span></div>
       <div class="hero-amount${f.available < 0 ? ' neg' : ''}">${money(f.available, { unit: false })}<span class="cur">đ</span></div>
       <p class="hero-sub">Mỗi ngày nên tiêu tối đa <b>${money(f.safe_daily)}</b> đến hết tháng (còn ${f.days_left_month} ngày). Tuần này còn <b>${money(f.weekly_allowance)}</b>.</p>
       ${runway(f, d)}
     </section>
 
-    ${d.warnings.map(w => `<div class="notice ${w.level === 'danger' ? 'danger' : w.level === 'warn' ? 'warn' : ''}">${h(w.text)}</div>`).join('')}
+    ${d.warnings.map(w => `<div class="notice ${w.level === 'danger' ? 'danger' : w.level === 'warn' ? 'warn' : ''}">${h(privacy.on ? w.text.replace(/[\d.]+đ/g, '••••••đ') : w.text)}</div>`).join('')}
 
     <div class="figures">
       <div class="fig"><div class="k">Số dư thực có</div><div class="v">${money(f.balance)}</div><div class="n">${d.accounts.filter(a => !a.archived).length} tài khoản</div></div>

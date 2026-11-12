@@ -80,11 +80,18 @@ export function enrichJob(job, received, today) {
 }
 
 /** filter(job) → bool. Trả danh sách show kèm số tiền, mới nhất trước. */
-export function jobsWithMoney(db, today, filter = () => true) {
+function receivedMap(db) {
+  if (db._linesByTx && db._received) return db._received;
   const received = new Map();
   for (const t of liveTx(db)) {
     if (t.job_id && (t.kind === 'job_payment' || t.kind === 'job_refund')) received.set(t.job_id, (received.get(t.job_id) || 0) + txSum(db, t));
   }
+  db._received = received;  // bị xóa cùng _linesByTx mỗi khi có thay đổi
+  return received;
+}
+
+export function jobsWithMoney(db, today, filter = () => true) {
+  const received = receivedMap(db);
   const clients = new Map(db.all('clients').map(c => [c.id, c]));
   return db.live('jobs').filter(filter)
     .sort((a, b) => (b.work_date || '').localeCompare(a.work_date || '') || (b.created_at || '').localeCompare(a.created_at || ''))

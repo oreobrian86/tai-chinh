@@ -6,6 +6,7 @@ import * as rp from './reports.js';
 import * as sv from './services.js';
 import { AppError } from './store.js';
 import { S, parse } from './validate.js';
+import { desiredEvents } from './gcal.js';
 
 const pad = n => String(n).padStart(2, '0');
 export const localToday = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
@@ -14,10 +15,12 @@ const checkDates = (...ds) => ds.forEach(d => { if (!fe.isValidDate(d)) throw ne
 
 export class Api {
   /** session: DataSession; today(): chuỗi ngày hôm nay (cho phép giả lập khi kiểm thử). */
-  constructor(session, { today = localToday, backups = null } = {}) {
+  constructor(session, { today = localToday, backups = null, calendar = null, appUrl = '' } = {}) {
     this.s = session;
     this.today = today;
     this.backups = backups;
+    this.calendar = calendar;
+    this.appUrl = appUrl;
     this.routes = [];
     this.build();
   }
@@ -97,6 +100,7 @@ export class Api {
     on('PATCH', '/api/categories/{id}', W((c, tx, db) => sv.updateCategory(tx, db, c.p.id, c.body)), S.CategoryPatch);
     on('DELETE', '/api/categories/{id}', W((c, tx, db) => sv.deleteCategory(tx, db, c.p.id, c.q.reassign_to)));
     on('GET', '/api/clients', R((c, db) => db.live('clients').map(fe.stripPriv).sort((a, b) => a.name.localeCompare(b.name))));
+    on('GET', '/api/clients/recent', R((c, db) => sv.recentClients(db)));
     on('POST', '/api/clients', W((c, tx, db) => sv.saveClient(tx, db, c.body)), S.Client);
     on('PUT', '/api/clients/{id}', W((c, tx, db) => sv.saveClient(tx, db, c.body, c.p.id)), S.Client);
     on('DELETE', '/api/clients/{id}', W((c, tx, db) => { sv.deleteClient(tx, db, c.p.id); return { ok: true }; }));
@@ -197,6 +201,24 @@ export class Api {
       filename: `bao-cao-${c.today}.csv`, mime: 'text/csv;charset=utf-8', content: rp.toCsv(rp.reportTable(rp.monthlyReport(db, months(c), c.today))) } })));
     on('GET', '/api/export/all.json', R((c, db) => ({ __download: {
       filename: `toan-bo-du-lieu-${c.today}.json`, mime: 'application/json', content: JSON.stringify(rp.exportAll(db), null, 1) } })));
+
+    // ---------- Google Calendar (đồng bộ một chiều) ----------
+    const syncCal = async () => {
+      if (!this.calendar) throw new AppError(400, 'demo', 'Chế độ dùng thử không đồng bộ Google Calendar.');
+      const db = await this.s.refresh();
+      const st = sv.getSettings(db);
+      const calId = await this.calendar.ensureCalendar(st.gcal_calendar_id);
+      const stats = await this.calendar.sync(calId, desiredEvents(db, { includeFee: !!st.gcal_include_fee, appUrl: this.appUrl }));
+      await this.write((tx, d) => sv.updateSettings(tx, d, { gcal_enabled: true, gcal_calendar_id: calId, gcal_last_sync: new Date().toISOString() }));
+      return { ...stats, calendar_id: calId };
+    };
+    on('POST', '/api/gcal/enable', () => syncCal());
+    on('POST', '/api/gcal/sync', async () => {
+      const st = sv.getSettings(await this.read());
+      if (!st.gcal_enabled) return { skipped: true };
+      return syncCal();
+    });
+    on('POST', '/api/gcal/disable', W((c, tx, db) => sv.updateSettings(tx, db, { gcal_enabled: false })));
 
     // ---------- sao lưu (Google Drive) ----------
     on('GET', '/api/backups', async () => (this.backups ? this.backups.list() : []));

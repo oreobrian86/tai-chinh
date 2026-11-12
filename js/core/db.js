@@ -94,14 +94,14 @@ export class Tx {
     row._row = this.db.t[table].length + 2;
     row._new = true;
     this.db.t[table].push(row);
-    this.db._linesByTx = null;
+    this.db._linesByTx = null; this.db._received = null;
     if (row.id) this.db.byId[table].set(row.id, row);
     this.ops.push({ type: 'append', table, row });
     return row;
   }
 
   update(table, id, patch) {
-    this.db._linesByTx = null;
+    this.db._linesByTx = null; this.db._received = null;
     const row = this.db.byId[table].get(id);
     if (!row) throw new Error(`Không tìm thấy ${table}/${id}`);
     for (const [k, v] of Object.entries(patch)) {

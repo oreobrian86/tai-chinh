@@ -110,6 +110,7 @@ export async function jobView(root, params) {
       <div class="row wrap">
         ${j.work_status !== 'cancelled' && j.outstanding > 0 ? `<button class="btn sage" data-pay>Ghi nhận tiền về</button>` : ''}
         ${j.work_status !== 'cancelled' ? `<button class="btn" data-edit>${icon('edit')}Sửa</button>` : ''}
+        <button class="btn" data-copy>Nhân bản show</button>
       </div></div>
     ${j.conflicts.length ? `<div class="notice danger">Trùng giờ với: ${j.conflicts.map(c => h(c.a_job === j.id ? c.b_title : c.a_title) + ' (' + dmy(c.date) + ')').join(', ')}</div>` : ''}
     <div class="grid g2 mt">
@@ -148,6 +149,7 @@ export async function jobView(root, params) {
   const reload = () => jobView(root, params);
   $('[data-pay]', root)?.addEventListener('click', () => openPaymentForm(j, reload));
   $('[data-edit]', root)?.addEventListener('click', () => openJobForm(j, { onDone: reload }));
+  $('[data-copy]', root)?.addEventListener('click', () => openJobForm(null, { copyFrom: j, onDone: saved => { location.hash = '#/job/' + saved.id; } }));
   $('[data-cancel]', root)?.addEventListener('click', () => {
     if (j.received > 0) openCancelForm(j, reload);
     else confirmDialog('Hủy show này? Công nợ sẽ về 0.', { ok: 'Hủy show', danger: true }).then(async ok => {

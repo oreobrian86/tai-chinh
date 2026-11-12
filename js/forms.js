@@ -198,17 +198,22 @@ const sessionRow = (s = {}) => `
       <button type="button" class="btn ghost icon-btn" data-rm aria-label="Bỏ ngày này">✕</button></div>
   </div>`;
 
-export function openJobForm(job = null, { date, onDone } = {}) {
+export function openJobForm(job = null, { date, onDone, copyFrom = null } = {}) {
   const multi = job && job.sessions && job.sessions.length > 1;
   const first = job?.sessions?.[0] || {};
+  const pre = job || copyFrom;  // nhân bản show: điền sẵn từ show cũ nhưng tạo show MỚI
+  const pfirst = job ? first : (copyFrom?.sessions?.[0] || {});
+  const recent = job ? [] : (state.recentClients || []).slice(0, 8);
   const body = `<form class="form" novalidate>
-    ${field('Tên show / dự án', `<input class="input" name="title" maxlength="200" value="${h(job?.title || '')}" placeholder="Ví dụ: Quay cưới Hoàng & Mai" autofocus>`)}
+    ${field('Tên show / dự án', `<input class="input" name="title" maxlength="200" value="${h(pre?.title || '')}" placeholder="Ví dụ: Quay cưới Hoàng & Mai" autofocus>`)}
+    ${recent.length ? `<div class="field"><span>Khách gần đây (chạm để chọn, tự điền theo show gần nhất)</span><div class="row wrap client-chips">${recent.map(c => `<button type="button" class="chip client-chip" data-client="${h(c.id)}">${h(c.name)}</button>`).join('')}</div></div>` : ''}
     <div class="two">
-      ${field('Khách hàng / chủ show', `<input class="input" name="client_name" list="client-list" maxlength="200" value="${h(job?.client_name || '')}" placeholder="Tên người thuê">
+      ${field('Khách hàng / chủ show', `<input class="input" name="client_name" list="client-list" maxlength="200" value="${h(pre?.client_name || '')}" placeholder="Tên người thuê">
         <datalist id="client-list">${state.clients.map(c => `<option value="${h(c.name)}">`).join('')}</datalist>`)}
-      ${field('Loại công việc', `<select class="input" name="work_type">${options(Object.entries(WORK_TYPES), job?.work_type || 'video')}</select>`)}
+      ${field('Loại công việc', `<select class="input" name="work_type">${options(Object.entries(WORK_TYPES), pre?.work_type || 'video')}</select>`)}
     </div>
-    ${field('Tổng tiền công', `<input class="input" name="total_fee" inputmode="numeric" value="${job ? new Intl.NumberFormat('vi-VN').format(job.total_fee) : ''}" placeholder="Ví dụ: 1.500.000 hoặc 1tr5">`)}
+    ${field('Tổng tiền công', `<input class="input" name="total_fee" inputmode="numeric" value="${pre ? new Intl.NumberFormat('vi-VN').format(pre.total_fee) : ''}" placeholder="Ví dụ: 1.500.000 hoặc 1tr5">`)}
+    <p class="small muted autofill-hint hidden"></p>
     ${job ? '' : `<div class="two">
       ${field('Tiền cọc đã nhận', `<input class="input" name="deposit" inputmode="numeric" placeholder="0">`)}
       ${field('Cọc vào tài khoản', accountSelect('deposit_account_id'))}
@@ -219,10 +224,10 @@ export function openJobForm(job = null, { date, onDone } = {}) {
     </div>
     <div class="single-session${multi ? ' hidden' : ''}">
       <div class="two">
-        ${field('Giờ bắt đầu', `<input class="input" type="time" name="start_time" value="${h(first.start_time || '')}">`)}
-        ${field('Giờ kết thúc', `<input class="input" type="time" name="end_time" value="${h(first.end_time || '')}">`)}
+        ${field('Giờ bắt đầu', `<input class="input" type="time" name="start_time" value="${h(pfirst.start_time || '')}">`)}
+        ${field('Giờ kết thúc', `<input class="input" type="time" name="end_time" value="${h(pfirst.end_time || '')}">`)}
       </div>
-      ${field('Địa điểm', `<input class="input" name="location" maxlength="300" value="${h(job?.location || first.location || '')}">`)}
+      ${field('Địa điểm', `<input class="input" name="location" maxlength="300" value="${h(pre?.location || pfirst.location || '')}">`)}
     </div>
     <label class="check"><input type="checkbox" name="multi"${multi ? ' checked' : ''}> Nhiều ngày làm / nhiều công đoạn (quay, dựng, bàn giao…)</label>
     <div class="sessions${multi ? '' : ' hidden'}">
@@ -231,18 +236,36 @@ export function openJobForm(job = null, { date, onDone } = {}) {
     </div>
     ${job ? field('Trạng thái', `<select class="input" name="work_status"${job.work_status === 'cancelled' ? ' disabled' : ''}>${options([['booked', 'Đã nhận show'], ['in_progress', 'Đang thực hiện'], ['done', 'Hoàn thành']], job.work_status)}</select>`) :
       field('Trạng thái', `<select class="input" name="work_status">${options([['booked', 'Đã nhận show (chưa làm)'], ['in_progress', 'Đang thực hiện'], ['done', 'Đã làm xong']], 'booked')}</select>`)}
-    <details class="more"${job?.description || job?.note ? ' open' : ''}><summary>Nội dung và ghi chú</summary>
+    <details class="more"${pre?.description || pre?.note ? ' open' : ''}><summary>Nội dung và ghi chú</summary>
       <div class="form">
-        ${field('Nội dung công việc', `<textarea class="input" name="description" maxlength="2000">${h(job?.description || '')}</textarea>`)}
+        ${field('Nội dung công việc', `<textarea class="input" name="description" maxlength="2000">${h(pre?.description || '')}</textarea>`)}
         ${field('Ghi chú', `<textarea class="input" name="note" maxlength="2000">${h(job?.note || '')}</textarea>`)}
       </div>
     </details>
     <div class="sheet-foot"><button class="btn primary block" type="submit">${job ? 'Lưu show' : 'Tạo show'}</button></div>
   </form>`;
-  sheet(job ? 'Sửa show' : 'Show mới', body, {
+  sheet(job ? 'Sửa show' : copyFrom ? 'Nhân bản show' : 'Show mới', body, {
     onMount(root, close) {
       const form = $('form', root);
       ['total_fee', 'deposit'].forEach(n => form[n] && formatMoneyInput(form[n]));
+      // Chọn khách quen: điền tên + các thông tin theo show gần nhất với khách đó (chỉ ô còn trống hoặc chưa sửa)
+      const touched = new Set();
+      ['work_type', 'total_fee', 'location', 'start_time', 'end_time'].forEach(n => form[n]?.addEventListener('input', () => touched.add(n)));
+      const applyClient = c => {
+        if (!c || job) return;
+        form.client_name.value = c.name;
+        $$('.client-chip', root).forEach(b => b.setAttribute('aria-pressed', String(b.dataset.client === c.id)));
+        const L = c.last || {};
+        const set = (n, v) => { if (v !== null && v !== undefined && v !== '' && form[n] && !touched.has(n)) form[n].value = v; };
+        set('work_type', L.work_type);
+        if (L.total_fee) set('total_fee', new Intl.NumberFormat('vi-VN').format(L.total_fee));
+        set('location', L.location); set('start_time', L.start_time); set('end_time', L.end_time);
+        const hint = $('.autofill-hint', root);
+        hint.textContent = `Đã điền theo show gần nhất với ${c.name} (${L.title || ''}${L.total_fee ? `, ${short(L.total_fee)}` : ''}). Sửa nếu lần này khác. Đã làm ${c.job_count} show với khách này.`;
+        hint.classList.remove('hidden');
+      };
+      on(root, 'click', '.client-chip', (e, b) => applyClient(recent.find(c => c.id === b.dataset.client)));
+      form.client_name.addEventListener('change', () => applyClient((state.recentClients || []).find(c => c.name.toLowerCase() === form.client_name.value.trim().toLowerCase())));
       form.multi.addEventListener('change', () => {
         $('.sessions', root).classList.toggle('hidden', !form.multi.checked);
         $('.single-session', root).classList.toggle('hidden', form.multi.checked);

@@ -5,4 +5,6 @@ export const CONFIG = {
   CLIENT_ID: '465503547302-omgf2go5hta0uou6oibm4r3r9h7ugjg5.apps.googleusercontent.com',
   // Quyền hẹp nhất: app chỉ đọc/ghi các file do chính nó tạo trong Google Drive của bạn.
   SCOPE: 'https://www.googleapis.com/auth/drive.file',
+  // Tùy chọn: chỉ tạo và quản lý MỘT lịch riêng của app trên Google Calendar (không đọc lịch cá nhân).
+  CALENDAR_SCOPE: 'https://www.googleapis.com/auth/calendar.app.created',
 };

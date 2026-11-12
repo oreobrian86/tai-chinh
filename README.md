@@ -19,6 +19,20 @@ Muốn xem giao diện khi chưa có Client ID: mở link kèm `?demo` ở cuố
 
 Tải các file mới lên đè vào kho GitHub (Add file → Upload files). **Đừng ghi đè `config.js`** nếu bản mới không yêu cầu, để khỏi phải dán lại Client ID. Lần mở app tiếp theo, máy tính và điện thoại tự nhận bản mới. Dữ liệu trong Drive không bị ảnh hưởng.
 
+## Đồng bộ Google Calendar (tùy chọn)
+
+Một lần trên Google Cloud (dự án `Tai Chinh`):
+1. Ô tìm kiếm → **Google Calendar API** → **Enable**.
+2. Google Auth Platform → **Data Access** → **Add or remove scopes** → tick `.../auth/calendar.app.created` → **Update** → **Save**.
+
+Trong app: **Đăng xuất Google**, đăng nhập lại, tick ô cho phép **Lịch**. Sau đó vào Cài đặt → Google Calendar → **Bật đồng bộ**. App tạo một lịch riêng tên *Lịch làm việc freelance* và tự cập nhật khoảng 4 giây sau mỗi lần sửa lịch trong app. Đồng bộ chỉ một chiều: hãy sửa lịch trong app, sửa trên Google Calendar sẽ bị ghi đè. App chỉ quản lý lịch riêng này, không đọc được lịch cá nhân của bạn.
+
+## Mẹo dùng nhanh
+
+- **Ẩn số tiền:** bấm biểu tượng con mắt cạnh "Có thể tiêu" (điện thoại) hoặc ở thanh bên (máy tính). Mọi số tiền hiện thành ••••••. Lựa chọn được nhớ chung cho mọi thiết bị.
+- **Khách quen:** khi tạo show, chạm tên khách ở hàng "Khách gần đây". App tự điền loại việc, tiền công, địa điểm, giờ theo show gần nhất với khách đó.
+- **Nhân bản show:** mở một show cũ → **Nhân bản show** để tạo show mới giống hệt. Tiền cọc và hạn thanh toán không được chép sang.
+
 ## Cách ứng dụng tính tiền
 
 | Con số | Nghĩa | Có tính vào "Có thể tiêu"? |

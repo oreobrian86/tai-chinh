@@ -8,7 +8,12 @@ export function h(v) {
   return String(v).replace(/[&<>"'`]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[c]));
 }
 
+/** Chế độ ẩn số tiền (nút con mắt). */
+export const privacy = { on: false };
+const MASK = '••••••';
+
 export const money = (v, { sign = false, unit = true } = {}) => {
+  if (privacy.on) return MASK + (unit ? 'đ' : '');
   const n = Math.round(Number(v) || 0);
   const s = nf.format(Math.abs(n));
   const pre = n < 0 ? '−' : (sign && n > 0 ? '+' : '');
@@ -17,6 +22,7 @@ export const money = (v, { sign = false, unit = true } = {}) => {
 
 /** Rút gọn: 1.500.000 → 1,5tr ; 45.000 → 45k */
 export const short = v => {
+  if (privacy.on) return '•••';
   const n = Math.round(Number(v) || 0), a = Math.abs(n), s = n < 0 ? '−' : '';
   if (a >= 1e9) return s + trim(a / 1e9) + ' tỷ';
   if (a >= 1e6) return s + trim(a / 1e6) + 'tr';

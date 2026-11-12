@@ -1,15 +1,16 @@
 // Khởi động: đăng nhập Google → mở (hoặc tạo) file dữ liệu trên Drive → khung ứng dụng + điều hướng.
-import { get, onApi, post, setBackend } from './api.js';
+import { get, onApi, post, put, setBackend } from './api.js';
 import { Backups } from './core/backups.js';
 import { Api } from './core/router.js';
 import { DataSession, MemoryStore, SheetsStore } from './core/store.js';
+import { CalendarSync } from './core/gcal.js';
 import { seedDemo } from './demo.js';
 import { updateSettings } from './core/services.js';
 import { openQuickAdd } from './forms.js';
 import * as google from './google.js';
 import { loadRefs, onChanged, state } from './state.js';
 import { icon, sheet, toast, toastErr } from './ui.js';
-import { $, $$, applyDynamic, h, on } from './util.js';
+import { $, $$, applyDynamic, h, on, privacy } from './util.js';
 import { calendarView } from './views/calendar.js';
 import { dashboardView } from './views/dashboard.js';
 import { expensesView } from './views/expenses.js';
@@ -66,10 +67,12 @@ async function openData() {
     runtime.store = new SheetsStore(google.getToken);
     runtime.session = new DataSession(runtime.store);
     runtime.backups = new Backups(runtime.store, runtime.session);
-    setBackend(new Api(runtime.session, { backups: runtime.backups }));
+    setBackend(new Api(runtime.session, { backups: runtime.backups, calendar: new CalendarSync(google.getToken),
+      appUrl: location.origin + location.pathname }));
   }
   if (!runtime.store.id) await runtime.store.open();
   await runtime.session.refresh();
+  runtime.session.onUpdate = () => render({ keepScroll: true });
   await start();
   // tự sao lưu mỗi ngày (không chặn giao diện)
   runtime.backups.maybeAuto(state.settings.last_backup_at)
@@ -81,6 +84,7 @@ async function start() {
   const st = await get('/api/state');
   if (st.setup_needed) await post('/api/setup');
   state.settings = (await get('/api/state')).settings;
+  privacy.on = !!state.settings.hide_amounts;
   state.user = { display_name: state.settings.display_name || 'Tài chính' };
   await loadRefs();
   shell();
@@ -88,11 +92,38 @@ async function start() {
   if (!started) {
     started = true;
     window.addEventListener('hashchange', () => render());
-    onChanged(() => render({ keepScroll: true }));
+    onChanged(() => { render({ keepScroll: true }); scheduleCalendarSync(); });
     onApi('unauth', () => reauthPrompt());
   }
   render();
+  scheduleCalendarSync(500);
 }
+
+// ---------- tự đồng bộ Google Calendar (chạy ngầm, chờ 4 giây sau lần sửa cuối) ----------
+let calTimer = null, calWarned = false;
+function scheduleCalendarSync(delay = 4000) {
+  if (runtime.demo || !state.settings?.gcal_enabled || !google.calendarGranted()) return;
+  clearTimeout(calTimer);
+  calTimer = setTimeout(async () => {
+    try { await post('/api/gcal/sync'); calWarned = false; }
+    catch (e) { if (!calWarned && e.code !== 'google_auth') { calWarned = true; toast('Chưa đồng bộ được Google Calendar: ' + e.message, 'err'); } }
+  }, delay);
+}
+
+/** Bật/tắt ẩn số tiền (nhớ chung cho mọi thiết bị). */
+export async function togglePrivacy() {
+  privacy.on = !privacy.on;
+  updateEye();
+  render({ keepScroll: true });
+  try { state.settings = await put('/api/settings', { hide_amounts: privacy.on }); } catch (_) { }
+}
+function updateEye() {
+  $$('[data-eye]').forEach(b => {
+    b.innerHTML = `${icon(privacy.on ? 'eyeOff' : 'eye')}<span class="eye-label">${privacy.on ? 'Hiện số tiền' : 'Ẩn số tiền'}</span>`;
+    b.setAttribute('aria-pressed', String(privacy.on));
+  });
+}
+window.addEventListener('toggle-privacy', togglePrivacy);
 
 let reauthOpen = false;
 function reauthPrompt() {
@@ -117,7 +148,7 @@ function shell() {
       <div class="brand"><span class="brand-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="7" width="20" height="10" rx="2" fill="#5F8370"/><path d="M6 7v10M18 7v10" stroke="#F6F5F0" stroke-width="1.5"/></svg></span>
         <span>${h(state.user?.display_name || 'Tài chính')}</span></div>
       <nav class="nav">${NAV.map(([r, l, i]) => `<a href="#/${r}" data-r="${r}">${icon(i)}${l}</a>`).join('')}</nav>
-      <div class="side-foot"><button class="btn ghost" data-lock>${icon('lock')}Khóa ứng dụng</button></div>
+      <div class="side-foot"><button class="btn ghost" data-eye></button><button class="btn ghost" data-lock>${icon('lock')}Khóa ứng dụng</button></div>
     </aside>
     <main class="main" id="view" tabindex="-1"></main>
     <nav class="tabbar" aria-label="Điều hướng nhanh">${TABS.map(t => t === 'more' ? `<button data-more>${icon('menu')}Thêm</button>`
@@ -126,6 +157,7 @@ function shell() {
     <button class="fab" data-add>${icon('plus')}Thêm nhanh</button>
   </div>`;
   on(app, 'click', '[data-add]', () => openQuickAdd());
+  on(app, 'click', '[data-eye]', () => togglePrivacy());
   on(app, 'click', '[data-lock]', () => lockNow());
   on(app, 'click', '[data-more]', () => sheet('Mục khác', `<nav class="list more-menu">
       ${[['income', 'Thu nhập và show', 'income'], ['income/receivables', 'Công nợ cần thu', 'income'], ['savings', 'Tiết kiệm', 'savings'],
@@ -162,6 +194,7 @@ async function render({ keepScroll = false } = {}) {
     return;
   }
   applyDynamic(view);
+  updateEye();
   if (keepScroll) window.scrollTo(0, y); else window.scrollTo(0, 0);
   document.title = (NAV.find(n => n[0] === navKey)?.[1] || 'Tài chính') + ' · Tài chính & Lịch';
 }
@@ -191,8 +224,10 @@ window.addEventListener('app-lock', lockNow);
 let started = false;
 async function boot() {
   if (DEMO) {
+    google.forget();
     runtime.store = new MemoryStore();
     runtime.session = new DataSession(runtime.store);
+    runtime.session.onUpdate = () => render({ keepScroll: true });
     setBackend(new Api(runtime.session));
     await post('/api/setup');
     await seedDemo();
@@ -207,7 +242,34 @@ new MutationObserver(muts => {
   for (const m of muts) for (const n of m.addedNodes) if (n.nodeType === 1) applyDynamic(n.parentElement || n);
 }).observe(document.body, { childList: true, subtree: true });
 
-if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  navigator.serviceWorker.register('./sw.js').catch(() => { });
+// ---------- bản cập nhật mới ----------
+function showUpdateBar(worker) {
+  if (document.querySelector('.update-bar')) return;
+  const bar = document.createElement('div');
+  bar.className = 'update-bar';
+  bar.setAttribute('role', 'status');
+  bar.innerHTML = '<span>Đã có bản cập nhật mới.</span><button class="btn sm">Dùng bản mới</button>';
+  bar.querySelector('button').onclick = () => { worker.postMessage('skip-waiting'); };
+  document.body.appendChild(bar);
 }
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === '127.0.0.1' || location.hostname === 'localhost')) {
+  navigator.serviceWorker.register('./sw.js').then(reg => {
+    if (reg.waiting && navigator.serviceWorker.controller) showUpdateBar(reg.waiting);
+    reg.addEventListener('updatefound', () => {
+      const w = reg.installing;
+      w?.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) showUpdateBar(w); });
+    });
+    setInterval(() => reg.update().catch(() => { }), 30 * 60 * 1000);
+  }).catch(() => { });
+  let reloading = false;
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloading) { reloading = true; location.reload(); } });
+}
+
+// Mở lại app từ nền (chuyển tab / mở lại trên điện thoại): lấy dữ liệu mới ở nền, không bắt chờ.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && runtime.session?.loadedAt && Date.now() - runtime.session.loadedAt > 15000) {
+    runtime.session.backgroundRefresh();
+  }
+});
 boot();

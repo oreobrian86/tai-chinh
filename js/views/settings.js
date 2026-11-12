@@ -1,6 +1,7 @@
 import { del, download, get, patch, post, put } from '../api.js';
 import { runtime } from '../app.js';
 import * as google from '../google.js';
+import { THEMES, currentTheme, setTheme } from '../theme.js';
 import { changed, state } from '../state.js';
 import { busy, confirmDialog, field, formData, icon, options, sheet, showErrors, toast, toastErr } from '../ui.js';
 import { $, ACCOUNT_KINDS, formatMoneyInput, h, money, on, parseMoney } from '../util.js';
@@ -27,15 +28,34 @@ export async function settingsView(root) {
         ${state.clients.length ? `<div class="list">${state.clients.map(c => `<div class="item" data-client="${h(c.id)}"><span class="ic">👤</span><span><div class="t">${h(c.name)}</div><div class="s">${h(c.phone || '')}</div></span><span class="v"></span></div>`).join('')}</div>`
           : '<p class="muted small">Khách được tự thêm khi bạn tạo show.</p>'}</section>
 
+      <section class="panel"><div class="panel-head"><h2>Chế độ nền</h2></div>
+        <div class="theme-grid">${THEMES.map(([k, l, c]) => `<button class="theme-opt" data-theme-opt="${k}" aria-pressed="${currentTheme() === k}">
+          <div class="theme-swatch" data-bg="${c[0]}"><i data-bg="${c[1]}"></i><i data-bg="${c[2]}"></i></div>${l}</button>`).join('')}</div>
+        <p class="small muted mt-xs">Mỗi thiết bị nhớ lựa chọn riêng, ví dụ máy tính dùng Kem sáng, điện thoại dùng Đen OLED cho đỡ tốn pin.</p>
+      </section>
+
       <section class="panel"><div class="panel-head"><h2>Bảo mật và hiển thị</h2></div>
         <div class="form">
           ${field('Tên hiển thị', `<input class="input" name="display_name" maxlength="100" value="${h(settings.display_name || '')}" placeholder="Tên của bạn">`)}
           ${field('Tự khóa sau khi không dùng', `<select class="input" name="lock_minutes">${options([[0, 'Không tự khóa'], [2, '2 phút'], [5, '5 phút'], [10, '10 phút'], [30, '30 phút'], [60, '1 giờ']], settings.lock_minutes)}</select>`,
             'Khi khóa, dữ liệu bị xóa khỏi bộ nhớ của trình duyệt; mở lại bằng đăng nhập Google.')}
+          <label class="check"><input type="checkbox" name="hide_amounts"${settings.hide_amounts ? ' checked' : ''}> Ẩn số tiền trên màn hình (bật/tắt nhanh bằng nút con mắt)</label>
           <label class="check"><input type="checkbox" name="exclude_one_off"${settings.exclude_one_off ? ' checked' : ''}> Bỏ các khoản chi lớn bất thường khỏi mức chi trung bình khi dự báo</label>
           <div class="row wrap"><button class="btn" data-lock>${icon('lock')}Khóa ngay</button>
             ${runtime.demo ? '' : '<button class="btn ghost danger" data-logout>Đăng xuất Google</button>'}</div>
         </div></section>
+
+      <section class="panel"><div class="panel-head"><h2>Google Calendar</h2>${settings.gcal_enabled ? '<span class="chip sage">Đang đồng bộ</span>' : ''}</div>
+        ${runtime.demo ? '<p class="muted small">Chế độ dùng thử không đồng bộ Google Calendar.</p>' : `
+        <p class="small muted">Đưa ngày quay, chụp, dựng, hạn bàn giao và ngày nghỉ lên một lịch riêng tên <b>Lịch làm việc freelance</b> trong Google Calendar, để xem cùng lịch cá nhân và nhận nhắc việc trên điện thoại. Đồng bộ một chiều: sửa lịch trong app, Calendar tự cập nhật sau vài giây.</p>
+        ${!google.calendarGranted() ? `<div class="notice warn mt-xs">Lần đăng nhập này chưa có quyền Google Calendar. Đăng xuất Google, đăng nhập lại và tick ô cho phép <b>Lịch</b>.</div>` : ''}
+        <div class="row wrap mt-xs">
+          ${settings.gcal_enabled ? `<button class="btn sm sage" data-gcal="sync">Đồng bộ ngay</button><button class="btn sm ghost danger" data-gcal="disable">Tắt đồng bộ</button>`
+            : `<button class="btn sm sage" data-gcal="enable"${google.calendarGranted() ? '' : ' disabled'}>Bật đồng bộ</button>`}
+        </div>
+        ${settings.gcal_last_sync ? `<p class="small faint mt-xs">Lần đồng bộ gần nhất: ${h(new Date(settings.gcal_last_sync).toLocaleString('vi-VN'))}</p>` : ''}
+        <label class="check mt-xs"><input type="checkbox" name="gcal_include_fee"${settings.gcal_include_fee ? ' checked' : ''}> Ghi tiền công vào mô tả sự kiện (lịch có thể hiện trên màn hình khóa điện thoại)</label>`}
+      </section>
 
       <section class="panel"><div class="panel-head"><h2>Dữ liệu trên Google Drive</h2></div>
         ${runtime.demo ? '<p class="muted small">Chế độ dùng thử không lưu lên Google.</p>' : `
@@ -62,7 +82,30 @@ export async function settingsView(root) {
   $('[name=lock_minutes]', root).addEventListener('change', e => save({ lock_minutes: Number(e.target.value) }));
   $('[name=exclude_one_off]', root).addEventListener('change', e => save({ exclude_one_off: e.target.checked }));
   $('[name=display_name]', root).addEventListener('change', e => save({ display_name: e.target.value }));
+  $('[name=hide_amounts]', root).addEventListener('change', () => window.dispatchEvent(new Event('toggle-privacy')));
+  $('[name=gcal_include_fee]', root)?.addEventListener('change', async e => { await save({ gcal_include_fee: e.target.checked }); if (settings.gcal_enabled) post('/api/gcal/sync').catch(toastErr); });
+  on(root, 'click', '[data-gcal]', (e, b) => busy(b, async () => {
+    const a = b.dataset.gcal;
+    try {
+      if (a === 'disable') {
+        await post('/api/gcal/disable');
+        toast('Đã tắt đồng bộ. Lịch trên Google Calendar vẫn giữ nguyên, bạn có thể tự xóa nếu không cần.');
+      } else {
+        const r = await post(a === 'enable' ? '/api/gcal/enable' : '/api/gcal/sync');
+        toast(`Đã đồng bộ: thêm ${r.created}, sửa ${r.updated}, xóa ${r.deleted}`);
+      }
+      state.settings = await get('/api/settings');
+      await changed();
+    } catch (err) {
+      if (err.code === 'gcal_api') toast('Cần bật Google Calendar API trong Google Cloud (xem hướng dẫn trong tin nhắn).', 'err');
+      else toastErr(err);
+    }
+  }));
   on(root, 'click', '[data-lock]', () => window.dispatchEvent(new Event('app-lock')));
+  on(root, 'click', '[data-theme-opt]', (e, b) => {
+    setTheme(b.dataset.themeOpt);
+    root.querySelectorAll('[data-theme-opt]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  });
   on(root, 'click', '[data-logout]', async () => {
     if (!await confirmDialog('Đăng xuất và thu hồi quyền của ứng dụng với Google Drive? Dữ liệu vẫn nằm nguyên trong Drive của bạn.', { ok: 'Đăng xuất' })) return;
     google.revoke(); location.reload();

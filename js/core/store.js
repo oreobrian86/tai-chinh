@@ -224,6 +224,9 @@ export class DataSession {
     this.db = new DB();
     this.loadedAt = 0;
     this.queue = Promise.resolve();
+    this.gen = 0;           // tăng mỗi lần ghi: tải nền cũ hơn lần ghi thì bỏ, không đè dữ liệu mới
+    this.bg = null;
+    this.onUpdate = null;   // gọi khi tải nền thấy dữ liệu thay đổi (vd. thiết bị khác vừa ghi)
   }
 
   async refresh() {
@@ -232,15 +235,38 @@ export class DataSession {
     return this.db;
   }
 
-  /** Đọc: dùng dữ liệu đã tải nếu còn mới (mặc định 20 giây) để app nhanh. */
-  async read(maxAgeMs = 20000) {
-    if (!this.loadedAt || Date.now() - this.loadedAt > maxAgeMs) await this.refresh();
+  static fingerprint(db) {
+    let n = 0, last = '';
+    for (const t of Object.keys(db.t)) for (const r of db.t[t]) { n++; if ((r.updated_at || '') > last) last = r.updated_at; }
+    return `${n}|${last}`;
+  }
+
+  /** Tải dữ liệu mới ở nền; không chặn giao diện. */
+  backgroundRefresh() {
+    if (this.bg || !this.loadedAt) return this.bg;
+    const gen = this.gen;
+    this.bg = this.store.load().then(data => {
+      if (gen !== this.gen) return;  // vừa có lần ghi trong lúc tải: dữ liệu tải về đã cũ
+      const before = DataSession.fingerprint(this.db);
+      this.db = new DB(data);
+      this.loadedAt = Date.now();
+      if (DataSession.fingerprint(this.db) !== before) this.onUpdate?.();
+    }).catch(() => { }).finally(() => { this.bg = null; });
+    return this.bg;
+  }
+
+  /** Đọc: trả ngay dữ liệu đang có; nếu đã cũ hơn maxAgeMs thì lấy bản mới ở nền.
+   *  Chỉ chờ mạng ở lần đọc đầu tiên. */
+  async read(maxAgeMs = 15000) {
+    if (!this.loadedAt) await this.refresh();
+    else if (Date.now() - this.loadedAt > maxAgeMs) this.backgroundRefresh();
     return this.db;
   }
 
   /** Ghi: luôn tải lại dữ liệu mới nhất trước (tránh đè thay đổi từ thiết bị khác), xếp hàng tuần tự. */
   mutate(fn) {
     const run = async () => {
+      this.gen++;
       await this.refresh();
       const tx = new Tx(this.db);
       let result;
@@ -251,6 +277,7 @@ export class DataSession {
         this.loadedAt = 0;  // bộ nhớ có thể đã bị sửa dở: lần đọc sau tải lại từ Sheet
         throw e;
       }
+      this.gen++;
       this.loadedAt = Date.now();
       return result;
     };

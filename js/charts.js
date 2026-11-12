@@ -18,7 +18,7 @@ export function groupedBars({ labels, series, height = 220, width = 640 }) {
   let out = `<svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Biểu đồ cột">`;
   for (let i = 0; i <= 4; i++) {
     const y = padT + ch - (ch * i) / 4;
-    out += `<line x1="${padL}" x2="${width - 6}" y1="${y}" y2="${y}" stroke="${C.grid}" stroke-width="1"/>`;
+    out += `<line x1="${padL}" x2="${width - 6}" y1="${y}" y2="${y}" class="g" stroke="${C.grid}" stroke-width="1"/>`;
     out += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end">${short((max * i) / 4)}</text>`;
   }
   labels.forEach((lb, i) => {
@@ -42,7 +42,7 @@ export function lineChart({ labels, values, color = C.expense, height = 200, wid
   let out = `<svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Biểu đồ xu hướng">`;
   for (let i = 0; i <= 4; i++) {
     const yy = padT + ch - (ch * i) / 4;
-    out += `<line x1="${padL}" x2="${width - 6}" y1="${yy}" y2="${yy}" stroke="${C.grid}"/>`;
+    out += `<line x1="${padL}" x2="${width - 6}" y1="${yy}" y2="${yy}" class="g" stroke="${C.grid}"/>`;
     out += `<text x="${padL - 8}" y="${yy + 4}" text-anchor="end">${short((max * i) / 4)}</text>`;
   }
   const pts = values.map((v, i) => `${x(i)},${y(v)}`).join(' ');
@@ -52,11 +52,11 @@ export function lineChart({ labels, values, color = C.expense, height = 200, wid
   const nz = values.filter(v => v > 0);
   if (nz.length) {
     const avg = nz.reduce((a, b) => a + b, 0) / nz.length;
-    out += `<line x1="${padL}" x2="${width - 6}" y1="${y(avg)}" y2="${y(avg)}" stroke="${C.ink}" stroke-opacity=".45" stroke-dasharray="4 4"/>`;
+    out += `<line x1="${padL}" x2="${width - 6}" y1="${y(avg)}" y2="${y(avg)}" class="avg" stroke="${C.ink}" stroke-opacity=".45" stroke-dasharray="4 4"/>`;
     out += `<text x="${width - 8}" y="${y(avg) - 6}" text-anchor="end">${h(avgLabel)} ${short(avg)}</text>`;
   }
   values.forEach((v, i) => {
-    out += `<circle cx="${x(i)}" cy="${y(v)}" r="4" fill="#fff" stroke="${color}" stroke-width="2"><title>${h(labels[i])}: ${h(short(v))}</title></circle>`;
+    out += `<circle class="pt" cx="${x(i)}" cy="${y(v)}" r="4" fill="#fff" stroke="${color}" stroke-width="2"><title>${h(labels[i])}: ${h(short(v))}</title></circle>`;
     out += `<text x="${x(i)}" y="${height - 8}" text-anchor="middle" class="lbl">${h(labels[i])}</text>`;
   });
   return out + '</svg>';
@@ -71,7 +71,8 @@ export function dailyBars({ days, values, height = 120, width = 640, color = C.e
   days.forEach((d, i) => {
     const v = values[i] || 0, bh = (ch * v) / max;
     const fill = d === highlight ? C.ink : color;
-    out += `<rect x="${i * bw + bw * 0.15}" y="${4 + ch - bh}" width="${bw * 0.7}" height="${Math.max(v ? 2 : 0, bh)}" rx="2" fill="${fill}"><title>${h(d)}: ${h(short(v))}</title></rect>`;
+    const cls = d === highlight ? ' class="hl"' : '';
+    out += `<rect${cls} x="${i * bw + bw * 0.15}" y="${4 + ch - bh}" width="${bw * 0.7}" height="${Math.max(v ? 2 : 0, bh)}" rx="2" fill="${fill}"><title>${h(d)}: ${h(short(v))}</title></rect>`;
     const dn = Number(d.slice(8));
     if (dn === 1 || dn % 5 === 0) out += `<text x="${i * bw + bw / 2}" y="${height - 4}" text-anchor="middle">${dn}</text>`;
   });

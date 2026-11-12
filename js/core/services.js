@@ -12,7 +12,8 @@ export const DEFAULT_EXPENSE_CATEGORIES = [
   ['Sức khỏe', '💊', '#7FA9A3'], ['Khác', '•', '#9A968E'],
 ];
 export const DEFAULT_INCOME_CATEGORIES = [['Thu nhập khác', '💰', '#7C9A85'], ['Quà tặng', '🎁', '#C77D8E'], ['Hoàn tiền', '↩', '#7C8FA6']];
-export const DEFAULT_SETTINGS = { lock_minutes: 10, exclude_one_off: false, display_name: '' };
+export const DEFAULT_SETTINGS = { lock_minutes: 10, exclude_one_off: false, display_name: '', hide_amounts: false,
+  gcal_enabled: false, gcal_calendar_id: null, gcal_include_fee: false, gcal_last_sync: null };
 
 export const notFound = what => new AppError(404, 'not_found', `Không tìm thấy ${what}`);
 const owned = (db, table, id, what = 'dữ liệu') => { const r = db.get(table, id); if (!r) throw notFound(what); return r; };
@@ -285,6 +286,26 @@ export function saveClient(tx, db, data, id = null) {
   tx.audit('client', id, 'save', data);
   return fe.stripPriv(db.get('clients', id));
 }
+/** Khách gần đây kèm thông tin show gần nhất, để điền sẵn khi tạo show mới. */
+export function recentClients(db, limit = 12) {
+  const jobs = db.live('jobs').slice().sort((a, b) => (b.work_date || '').localeCompare(a.work_date || '') || (b.created_at || '').localeCompare(a.created_at || ''));
+  const sessions = new Map();
+  for (const s of db.live('job_sessions')) if (!sessions.has(s.job_id) || s.date < sessions.get(s.job_id).date) sessions.set(s.job_id, s);
+  const out = new Map();
+  for (const j of jobs) {
+    if (!j.client_id) continue;
+    const c = db.get('clients', j.client_id);
+    if (!c) continue;
+    const cur = out.get(c.id);
+    if (cur) { cur.job_count++; continue; }
+    const s = sessions.get(j.id) || {};
+    out.set(c.id, { id: c.id, name: c.name, phone: c.phone || null, job_count: 1, last_date: j.work_date,
+      last: { title: j.title, work_type: j.work_type, total_fee: j.total_fee, location: j.location || s.location || null,
+        start_time: s.start_time || null, end_time: s.end_time || null } });
+  }
+  return [...out.values()].slice(0, limit);
+}
+
 export function deleteClient(tx, db, id) { owned(db, 'clients', id, 'khách hàng'); tx.softDelete('clients', id); }
 
 // ---------- show ----------

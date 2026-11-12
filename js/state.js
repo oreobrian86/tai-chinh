@@ -1,12 +1,12 @@
 // Bộ nhớ đệm dữ liệu dùng chung (tài khoản, danh mục, khách) + sự kiện "dữ liệu đã đổi".
 import { get } from './api.js';
 
-export const state = { user: null, settings: {}, accounts: [], categories: [], clients: [], loaded: false };
+export const state = { user: null, settings: {}, accounts: [], categories: [], clients: [], recentClients: [], loaded: false };
 const subs = new Set();
 
 export async function loadRefs() {
-  const [accounts, categories, clients] = await Promise.all([get('/api/accounts'), get('/api/categories'), get('/api/clients')]);
-  Object.assign(state, { accounts, categories, clients, loaded: true });
+  const [accounts, categories, clients, recentClients] = await Promise.all([get('/api/accounts'), get('/api/categories'), get('/api/clients'), get('/api/clients/recent')]);
+  Object.assign(state, { accounts, categories, clients, recentClients, loaded: true });
 }
 
 export const activeAccounts = () => state.accounts.filter(a => !a.archived);
