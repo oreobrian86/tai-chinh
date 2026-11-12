@@ -1,83 +1,68 @@
-# Tài chính & Lịch Freelance
+# Tài chính & Lịch Freelance (bản Google Drive)
 
-Ứng dụng quản lý tiền bạc và lịch làm việc cho người làm quay phim, dựng phim, chụp ảnh tự do. Chạy trên máy tính Windows của bạn, dữ liệu nằm trong một file trên máy, không gửi lên dịch vụ nào.
+Ứng dụng quản lý tiền và lịch làm việc cho người làm quay phim, dựng phim, chụp ảnh tự do. Chạy trên trình duyệt (máy tính và điện thoại Android), dữ liệu lưu trong **một file Google Sheet trong Google Drive của bạn**. Trang web đặt trên GitHub Pages chỉ chứa giao diện, không chứa dữ liệu.
 
-## Cài đặt trên Windows (lần đầu)
+## Đưa lên GitHub (lần đầu)
 
-1. **Cài Python 3.13.** Vào https://www.python.org/downloads/windows/, tải "Windows installer (64-bit)" của bản **Python 3.13** mới nhất. Khi cài, **tick ô "Add python.exe to PATH"**. Ứng dụng chạy với Python 3.12, 3.13 hoặc 3.14; **Python 3.15 chưa dùng được** vì một số thư viện chưa có bản cho 3.15. Nếu máy đã có 3.15, cứ cài thêm 3.13 song song, hoặc để `run.bat` tự cài bằng lệnh `py install 3.13`.
-2. **Giải nén** thư mục `finance-app` vào nơi bạn muốn, ví dụ `D:\TaiChinh\finance-app`. Tránh để trong OneDrive hoặc Google Drive đang đồng bộ, vì file dữ liệu đang mở có thể bị hỏng khi đồng bộ.
-3. **Nháy đúp `run.bat`.** Lần đầu sẽ mất 1–2 phút để tự cài thư viện (cần Internet). Các lần sau mở gần như ngay lập tức.
-4. Trình duyệt tự mở `http://127.0.0.1:8765`. Tạo tài khoản: chọn tên đăng nhập và một mật khẩu dài ít nhất 10 ký tự.
-5. Vào **Cài đặt → Tài khoản tiền**, bấm vào "Tiền mặt", "Ngân hàng" để nhập số dư thực tế hiện có, thêm ví MoMo/ZaloPay nếu dùng.
+1. Mở `config.js` bằng Notepad, thay `DAN_CLIENT_ID_VAO_DAY.apps.googleusercontent.com` bằng **Client ID** của bạn. Giữ nguyên hai dấu nháy `'...'`.
+2. Vào kho `tai-chinh` trên github.com. Xóa các file cũ của bản trước, nếu còn.
+3. Bấm **Add file → Upload files**. Mở thư mục đã giải nén, chọn **tất cả file và thư mục bên trong** (`index.html`, `config.js`, `css`, `js`, `icons`…), rồi kéo thả vào trang GitHub. `index.html` phải nằm ngay thư mục gốc của kho, không nằm trong thư mục con.
+4. Bấm **Commit changes**. Đợi 1–2 phút rồi mở `https://ten-cua-ban.github.io/tai-chinh/`.
+5. Bấm **Đăng nhập bằng Google**, chọn tài khoản. Nếu Google hiện cảnh báo *"Google chưa xác minh ứng dụng này"* (vì đây là app riêng của bạn, chưa nộp cho Google duyệt), bấm **Nâng cao → Đi tới ...**. Tick ô cho phép truy cập Drive (nếu có), rồi **Tiếp tục**.
+6. Lần đầu, app tự tạo file `Tài chính & Lịch Freelance (dữ liệu)` trong Drive của bạn.
 
-Nếu cài thư viện bị lỗi giữa chừng: xóa thư mục `.venv` trong `finance-app` rồi chạy lại `run.bat`.
+**Trên Android:** mở link bằng Chrome, bấm menu ⋮ → **Thêm vào màn hình chính** (hoặc *Cài đặt ứng dụng*).
 
-Để tắt ứng dụng: đóng cửa sổ đen (cửa sổ dòng lệnh) hoặc nhấn `Ctrl + C` trong cửa sổ đó.
+Muốn xem giao diện khi chưa có Client ID: mở link kèm `?demo` ở cuối, ví dụ `.../tai-chinh/?demo`. Chế độ này dùng dữ liệu mẫu, không ghi gì lên Google.
 
-> Lần thiết lập tài khoản đầu tiên chỉ làm được ngay trên máy tính chạy ứng dụng, không làm được từ điện thoại. Đây là chủ ý, để người lạ không thể "chiếm" ứng dụng trước bạn.
+## Cập nhật bản vá
 
-## Dùng trên điện thoại
+Tải các file mới lên đè vào kho GitHub (Add file → Upload files). **Đừng ghi đè `config.js`** nếu bản mới không yêu cầu, để khỏi phải dán lại Client ID. Lần mở app tiếp theo, máy tính và điện thoại tự nhận bản mới. Dữ liệu trong Drive không bị ảnh hưởng.
 
-Cách khuyến nghị là **Tailscale**: an toàn, dùng được cả ở nhà lẫn ngoài đường, có HTTPS thật nên cài được thành ứng dụng trên màn hình chính. Hướng dẫn từng bước ở [docs/SECURITY.md](docs/SECURITY.md#1-truy-cap-tu-dien-thoai-bang-tailscale-khuyen-nghi).
+## Cách ứng dụng tính tiền
 
-## Cách ứng dụng tính tiền (nên đọc một lần)
-
-| Con số | Nghĩa là | Có tính vào "Có thể tiêu" không? |
+| Con số | Nghĩa | Có tính vào "Có thể tiêu"? |
 | --- | --- | --- |
-| **Số dư thực có** | Tổng tiền đang thật sự nằm trong các tài khoản | Có, là điểm xuất phát |
-| **Khách còn nợ** | Tiền công đã kiếm nhưng khách chưa trả | **Không bao giờ** |
-| **Đang dành tiết kiệm** | Tiền bạn tự khóa cho mục tiêu và quỹ dự phòng | Bị trừ ra |
-| **Sắp phải trả** | Tiền nhà, điện nước… đến hạn trong tháng | Bị trừ ra |
-| **Có thể tiêu** | Số dư − tiền đã dành − khoản phải trả | Đây là kết quả |
+| Số dư thực có | Tiền đang thật sự có trong các tài khoản | Có, là điểm xuất phát |
+| Khách còn nợ | Tiền công đã kiếm nhưng chưa nhận | **Không bao giờ** |
+| Đang dành tiết kiệm | Tiền bạn tự giữ riêng cho mục tiêu và quỹ dự phòng | Bị trừ ra |
+| Sắp phải trả | Tiền nhà, điện nước… đến hạn trong tháng | Bị trừ ra |
 
-- **Một show chỉ ghi một lần.** Khách trả cọc, trả đợt 2, trả nốt: mỗi lần chỉ bấm "Ghi nhận tiền về" và nhập số tiền. Công nợ tự giảm, tiền tự vào tài khoản. Không tạo thêm "thu nhập" mới.
-- **Doanh thu ≠ tiền về.** Doanh thu tính theo ngày bạn làm show. Tiền về tính theo ngày khách trả. Báo cáo hiện cả hai, không cộng vào nhau.
-- **Chuyển tiền giữa tài khoản** (rút ATM, nạp ví) không phải thu hay chi.
-- **Để dành tiết kiệm không phải chi tiêu.** Tiền vẫn nằm trong tài khoản, chỉ bị giữ riêng.
-- **Hủy show:** chọn giữ cọc (cọc thành doanh thu) hoặc hoàn cọc (tạo khoản hoàn tiền). Công nợ về 0.
-- **Dự báo** cần ít nhất 14 ngày và 10 khoản chi mới đáng tin; trước đó ứng dụng sẽ ghi rõ "dữ liệu còn ít".
+- **Một show chỉ ghi một lần.** Khách trả từng đợt thì chỉ cần bấm "Ghi nhận tiền về". Công nợ tự giảm, không tạo thêm thu nhập mới.
+- **Doanh thu tính theo ngày làm, tiền về tính theo ngày nhận.** Hai số này không cộng vào nhau.
+- **Chuyển tiền giữa tài khoản** không phải thu hay chi. **Để dành tiết kiệm** không phải chi tiêu.
+- **Dự báo** cần ít nhất 14 ngày và 10 khoản chi mới đáng tin.
+
+## Bảo mật
+
+- **Bật xác thực 2 lớp** cho cả tài khoản GitHub lẫn Google. Đây là hai chìa khóa duy nhất.
+- App chỉ có quyền `drive.file`: chỉ đọc/ghi file do chính nó tạo, không xem được file khác trong Drive.
+- Quyền đăng nhập chỉ nằm trong bộ nhớ trình duyệt và tự hết hạn sau khoảng 1 giờ. Khi khóa app (nút Khóa, hoặc tự khóa sau 10 phút không dùng), dữ liệu bị xóa khỏi bộ nhớ. Không có dữ liệu tài chính nào lưu trên điện thoại.
+- **Mất điện thoại:** vào myaccount.google.com → Bảo mật → Thiết bị của bạn → đăng xuất thiết bị đó.
+- Chỉ mở app bằng icon trên màn hình chính hoặc link của chính bạn, không bấm link lạ.
+- Không sửa tay file Google Sheet dữ liệu (xem thì được). Nếu lỡ sửa sai: mở Sheet → Tệp → Nhật ký phiên bản để quay lại.
 
 ## Sao lưu
 
-- Ứng dụng **tự sao lưu mỗi ngày** vào `data\backups`, giữ 30 bản gần nhất.
-- Toàn bộ dữ liệu nằm trong `data\finance.db`. **Nên chép thư mục `data` sang USB hoặc ổ khác mỗi tuần.**
-- Khôi phục: Cài đặt → Sao lưu và dữ liệu → Khôi phục. Trước khi khôi phục, ứng dụng tự lưu một bản an toàn của dữ liệu hiện tại.
-- Xuất toàn bộ dữ liệu ra JSON, giao dịch ra CSV, báo cáo ra Excel: cũng trong Cài đặt.
+- App tự tạo bản sao file dữ liệu mỗi ngày trong Drive, giữ 30 bản gần nhất. Cài đặt → **Sao lưu ngay** để sao lưu thủ công.
+- Khôi phục: Cài đặt → bấm **Khôi phục** cạnh một bản sao lưu, hoặc **Khôi phục từ file JSON**. App luôn tự sao lưu dữ liệu hiện tại trước khi khôi phục.
+- File JSON xuất từ bản chạy trên máy tính trước đây cũng khôi phục được vào bản này.
 
-## Nhập sao kê ngân hàng (CSV / Excel)
+## Nhập sao kê ngân hàng
 
-Chi tiêu → Nhập từ file → chọn file → ghép cột → Kiểm tra dữ liệu → Nhập. Ứng dụng:
-- cho xem trước và tự đoán cột Ngày / Nội dung / Số tiền / Ghi nợ / Ghi có;
-- báo dòng lỗi (ngày sai, số tiền trống);
-- **không bao giờ nhập trùng**: nhập lại cùng một file thì 0 dòng mới;
-- cảnh báo "nghi trùng" nếu một dòng giống khoản bạn đã nhập tay (cùng ngày, số tiền, tài khoản);
-- cho **hoàn tác** cả lần nhập nếu nhầm.
+Chi tiêu → Nhập từ file. Chỉ nhận **CSV**. Với file Excel, mở bằng Excel hoặc Google Sheets rồi lưu/tải xuống dạng `.csv`. App cho xem trước, ghép cột, báo dòng lỗi, không bao giờ nhập trùng (nhập lại cùng file thì 0 dòng mới), và cho hoàn tác cả lần nhập.
 
-## Cấu trúc thư mục
+## Cấu trúc
 
 ```
-finance-app/
-  run.bat              Nháy đúp để chạy
-  run_tests.bat        Chạy bộ kiểm thử
-  .env.example         Mẫu cấu hình (đổi tên thành .env nếu cần sửa)
-  backend/app/         Máy chủ Python
-    finance.py         NƠI DUY NHẤT chứa công thức tiền
-    services.py        Nghiệp vụ ghi dữ liệu (show, giao dịch, tiết kiệm…)
-    security.py        Mật khẩu Argon2id, phiên đăng nhập, chống dò mật khẩu
-    migrations/        Cấu trúc database (file SQL đánh số)
-  backend/tests/       45 bài kiểm thử, gồm 10 kịch bản tiền bắt buộc
-  frontend/            Giao diện (HTML/CSS/JS, không cần build)
-  data/                Database, sao lưu, log (tự tạo, KHÔNG chia sẻ thư mục này)
-  docs/                Bảo mật, mô hình đe dọa, tiến độ
+index.html, config.js      Trang chính, cấu hình Client ID
+css/app.css                Giao diện
+js/core/finance.js         NƠI DUY NHẤT chứa công thức tiền
+js/core/services.js        Nghiệp vụ: show, giao dịch, tiết kiệm, lịch…
+js/core/store.js           Đọc/ghi Google Sheet (mỗi lần ghi là một lệnh nguyên khối)
+js/core/router.js          "Máy chủ" chạy ngay trong trình duyệt
+js/views/                  Các trang
+tests/                     Kiểm thử (Node.js + trình duyệt)
 ```
 
-## Chạy kiểm thử
-
-Nháy đúp `run_tests.bat`. Kết quả mong đợi: tất cả `passed` (test giao diện tự bỏ qua nếu chưa cài Playwright).
-
-## Lựa chọn công nghệ và lý do
-
-- **Backend: Python + Starlette + SQLite.** Starlette là lõi mà FastAPI xây bên trên. Mình dùng trực tiếp Starlette kèm Pydantic để validation (đúng phần FastAPI làm), vì cần chạy được bộ kiểm thử thật trong môi trường phát triển, nơi chỉ có sẵn Starlette. Cấu trúc router → service → database giống hệt FastAPI. Nếu muốn chuyển sang FastAPI sau này, chỉ phải sửa `main.py`; công thức tiền và nghiệp vụ giữ nguyên.
-- **Không dùng ORM.** Truy vấn SQL viết tay trong `finance.py`/`services.py` cho dễ kiểm tra từng con số. Migration là các file `.sql` đánh số, tự chạy khi khởi động.
-- **Frontend: HTML/CSS/JavaScript thuần (ES modules), biểu đồ SVG tự vẽ.** Thay cho React + TypeScript, vì: không cần cài Node.js trên Windows, không có bước build, không phụ thuộc thư viện ngoài, dễ đặt chính sách bảo mật nội dung (CSP) chặt. Đổi lại, code giao diện dài hơn một chút và không có kiểm tra kiểu của TypeScript.
-- **Database sẵn cho mở rộng:** mọi bảng có `user_id`, `id` dạng UUID, `version`, `deleted_at` (xóa mềm), nên có thể thêm nhiều tài khoản người dùng hoặc đồng bộ thiết bị mà không viết lại.
+Chạy kiểm thử (cần Node.js 20+): `node --test tests/*.test.mjs`.
